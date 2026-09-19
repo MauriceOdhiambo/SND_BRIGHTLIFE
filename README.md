@@ -1,34 +1,41 @@
-# SND Brightlife CBO — Vercel + Supabase Production Migration
+# SND Brightlife CBO — Full-Stack Web Application & Cloud Migration
 
-This package contains the complete migrated Brightlife frontend and Vercel backend generated from the supplied CODE.GS.
+## Project Overview
 
-## Project structure
+**SND Brightlife CBO** is a community-focused digital platform designed to support member management, savings, table banking, lending, repayments, communication, administration, reporting, and community development activities.
 
-- index.html — Brightlife frontend already switched to `/api/server`
-- api/server.js — migrated Brightlife backend
-- api/cron/[job].js — Vercel scheduled notification runner
-- supabase/production_auth.sql — persistent sessions + rate limiting
-- vercel.json — API limits and scheduled jobs
-- .env.example — required environment variables
+This project involved the **migration and modernization of an existing Google Apps Script–based application into a production-oriented Vercel, Node.js, and Supabase/PostgreSQL architecture**.
 
-## First setup
+The migration was designed to preserve the existing business workflows while introducing a more scalable deployment architecture, server-side authentication, persistent sessions, rate limiting, scheduled operations, secure environment configuration, and cloud-based integrations.
 
-1. Run `supabase/production_auth.sql` in Supabase SQL Editor.
-2. Upload this project to GitHub.
-3. In Vercel, add `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, and `CRON_SECRET`.
-4. If password reset emails are required, add `RESEND_API_KEY` and `RESEND_FROM_EMAIL`.
-5. If WhatsApp alerts are required, add `WHATSAPP_ACCESS_TOKEN` and `WHATSAPP_PHONE_NUMBER_ID`.
-6. Deploy.
+---
 
-## Security
+## Technology Stack
 
-Never place `SUPABASE_SECRET_KEY` in index.html or any browser JavaScript.
-Never commit `.env` files.
+- **Frontend:** HTML, CSS, JavaScript
+- **Backend:** Node.js / Vercel Serverless Functions
+- **Database:** Supabase / PostgreSQL
+- **Deployment:** Vercel
+- **Source Control:** GitHub
+- **Authentication:** Server-managed sessions
+- **Email:** Resend integration
+- **Notifications:** WhatsApp Cloud API integration
+- **Automation:** Vercel Cron Jobs
+- **Database Security:** PostgreSQL Row-Level Security (RLS)
 
-## Important
+---
 
-The supplied CODE.GS used Google Apps Script services. This migration replaces the database HTTP layer, CacheService sessions/rate limiting, email, WhatsApp notifications, and PDF report generation with Vercel/Node equivalents.
+## Key Contributions
 
-KCB M-Pesa functions remain the same safe placeholder behavior already present in the supplied CODE.GS because that source explicitly states the current database build does not contain the KCB provider tables/columns.
+### Cloud Architecture Migration
 
-Keep the old Google Apps Script deployment active until the Vercel deployment has been tested against real member, savings, loan, admin, messaging, reporting and payment workflows.
+Migrated the application from a Google Apps Script architecture to a modern cloud-based architecture:
+
+```text
+Previous Architecture
+
+Frontend
+   ↓
+Google Apps Script
+   ↓
+Supabase
