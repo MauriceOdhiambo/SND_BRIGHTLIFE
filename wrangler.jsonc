@@ -1,0 +1,19 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "snd-brightlife",
+  "compatibility_date": "2026-09-18",
+  "observability": {
+    "enabled": true
+  },
+  "assets": {
+    "directory": ".",
+    "ignore": [
+      "node_modules/**",
+      "api/**",
+      "cron/**",
+      "*.md",
+      ".env*",
+      ".gitignore"
+    ]
+  }
+}
