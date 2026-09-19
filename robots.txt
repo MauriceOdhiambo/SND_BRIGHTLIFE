@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Allow: /index.html
+Disallow: /api/
+Disallow: /cron/
+Disallow: /*.json$
+
+Sitemap: https://yourdomain.com/sitemap.xml
