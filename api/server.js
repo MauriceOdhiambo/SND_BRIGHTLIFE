@@ -95,9 +95,27 @@ async function validateSession_(actorId,token){
 }
 async function rateLimit_(prefix,value,limit,windowSeconds,message){
   const key='bl_rl_'+prefix+'_'+hashValue(String(value||''));
-  const r=await supabaseRequest('POST','rpc/increment_brightlife_rate_limit',{p_key:key,p_limit:Number(limit),p_window_seconds:Number(windowSeconds)});
-  if(r.statusCode<200||r.statusCode>=300)throw new Error('Rate limiting is not configured. Run supabase/production_auth.sql.');
-  const v=Array.isArray(r.data)?r.data[0]:r.data; if(v&&v.allowed===false)throw new Error(message||'Too many attempts. Please try again later.');
+  const r=await supabaseRequest('POST','rpc/increment_brightlife_rate_limit',{
+    p_key:key,
+    p_limit:Number(limit),
+    p_window_seconds:Number(windowSeconds)
+  });
+
+  if(r.statusCode<200||r.statusCode>=300){
+    console.error('Brightlife rate-limit RPC failed:', {
+      prefix,
+      statusCode:r.statusCode,
+      data:r.data
+    });
+    throw new Error('Authentication service is temporarily unavailable. Please try again later.');
+  }
+
+  const v=Array.isArray(r.data)?r.data[0]:r.data;
+  if(v&&v.allowed===false){
+    throw new Error(message||'Too many attempts. Please try again later.');
+  }
+
+  return v;
 }
 async function clearRateLimit_(prefix,value){
   const key='bl_rl_'+prefix+'_'+hashValue(String(value||''));
