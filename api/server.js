@@ -176,6 +176,26 @@ function getLoanInterestRate(days, settings) {
     return rate('21', 0.20);
 }
 
+const ROLE_PERMISSIONS = {
+  super_admin: {
+    view_members: true, edit_members: true, view_savings: true, view_repayments: true,
+    view_transactions: true, view_reports: true, registration_approval: true,
+    savings_approval: true, loan_approval: true, withdrawal_approval: true,
+    profile_approval: true, customer_care: true, grant_rights: true, manage_settings: true,
+    manage_content: true, data_import: true
+  },
+  // Administrator access is deliberately permission-driven.
+  // Super Admin grants the individual rights stored on the admin account.
+  admin: {},
+  treasurer: {
+    view_members: true, view_savings: true, view_repayments: true, view_transactions: true,
+    savings_approval: true
+  },
+  customer_care: { view_members: true, customer_care: true },
+  profile_approver: { view_members: true, profile_approval: true },
+  member: {}
+};
+
 function effectivePermissions_(role, stored) {
     var normalizedRole = String(role || 'member').toLowerCase();
     var result = {};
