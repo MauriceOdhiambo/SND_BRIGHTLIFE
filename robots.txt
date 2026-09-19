@@ -5,4 +5,4 @@ Disallow: /api/
 Disallow: /cron/
 Disallow: /*.json$
 
-Sitemap: https://yourdomain.com/sitemap.xml
+Sitemap: https://brightlifesnd.com/sitemap.xml
