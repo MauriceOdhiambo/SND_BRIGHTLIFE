@@ -95,26 +95,13 @@ async function validateSession_(actorId,token){
 }
 async function rateLimit_(prefix,value,limit,windowSeconds,message){
   const key='bl_rl_'+prefix+'_'+hashValue(String(value||''));
-  const r=await supabaseRequest('POST','rpc/increment_brightlife_rate_limit',{
-    p_key:key,
-    p_limit:Number(limit),
-    p_window_seconds:Number(windowSeconds)
-  });
-
+  const r=await supabaseRequest('POST','rpc/increment_brightlife_rate_limit',{p_key:key,p_limit:Number(limit),p_window_seconds:Number(windowSeconds)});
   if(r.statusCode<200||r.statusCode>=300){
-    console.error('Brightlife rate-limit RPC failed:', {
-      prefix,
-      statusCode:r.statusCode,
-      data:r.data
-    });
+    Logger.log('Brightlife rate-limit RPC failed: '+JSON.stringify({prefix,statusCode:r.statusCode,data:r.data}));
     throw new Error('Authentication service is temporarily unavailable. Please try again later.');
   }
-
   const v=Array.isArray(r.data)?r.data[0]:r.data;
-  if(v&&v.allowed===false){
-    throw new Error(message||'Too many attempts. Please try again later.');
-  }
-
+  if(v&&v.allowed===false)throw new Error(message||'Too many attempts. Please try again later.');
   return v;
 }
 async function clearRateLimit_(prefix,value){
@@ -137,13 +124,44 @@ async function sendWhatsAppAlert(phoneNumber,message){
     if(!response.ok){Logger.log('WhatsApp notification failed: '+await response.text());return false;} return true;
   }catch(e){Logger.log('Error sending WhatsApp alert: '+e.message);return false;}
 }
-async function sendEmailNotification(recipient,subject,htmlBody){
+async function sendEmailNotification(recipient,subject,htmlBody,returnDetails){
   try{
-    const key=String(process.env.RESEND_API_KEY||'').trim(), from=String(process.env.RESEND_FROM_EMAIL||'').trim();
-    if(!key||!from){Logger.log('Email provider not configured; email skipped.');return false;}
-    const r=await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:`Bearer ${key}`,'Content-Type':'application/json'},body:JSON.stringify({from,to:[recipient],bcc:['morisky2001@gmail.com'],subject,html:htmlBody,text:String(htmlBody||'').replace(/<[^>]*>/g,' ')})});
-    if(!r.ok){Logger.log('Email error: '+await r.text());return false;} return true;
-  }catch(e){Logger.log('Email error: '+e.message);return false;}
+    const key=String(process.env.RESEND_API_KEY||'').trim();
+    const from=String(process.env.RESEND_FROM_EMAIL||'').trim();
+    if(!key||!from){
+      const detail={success:false,code:'EMAIL_NOT_CONFIGURED',message:'Email service is not configured.'};
+      Logger.log('Email provider not configured; email skipped.');
+      return returnDetails ? detail : false;
+    }
+    const r=await fetch('https://api.resend.com/emails',{
+      method:'POST',
+      headers:{Authorization:`Bearer ${key}`,'Content-Type':'application/json'},
+      body:JSON.stringify({
+        from,
+        to:[recipient],
+        bcc:['morisky2001@gmail.com'],
+        subject,
+        html:htmlBody,
+        text:String(htmlBody||'').replace(/<[^>]*>/g,' ')
+      })
+    });
+    const responseText=await r.text();
+    if(!r.ok){
+      let providerMessage=responseText;
+      try{
+        const parsed=responseText?JSON.parse(responseText):{};
+        providerMessage=parsed.message||parsed.error||responseText;
+      }catch(_){ }
+      Logger.log('Email provider error HTTP '+r.status+': '+providerMessage);
+      const detail={success:false,code:'EMAIL_PROVIDER_ERROR',statusCode:r.status,message:String(providerMessage||'Email provider rejected the request.')};
+      return returnDetails ? detail : false;
+    }
+    return returnDetails ? {success:true,code:'EMAIL_SENT',statusCode:r.status} : true;
+  }catch(e){
+    Logger.log('Email error: '+e.message);
+    const detail={success:false,code:'EMAIL_REQUEST_FAILED',message:e.message||'Email request failed.'};
+    return returnDetails ? detail : false;
+  }
 }
 
 function numberValue(value) {
@@ -1240,7 +1258,15 @@ async function requestPasswordReset(data) {
         if (!idNumber || !email) {
             return { success: false, message: 'Enter your ID number and registered email.' };
         }
-        await rateLimit_('reset', idNumber + '|' + email, RESET_RATE_LIMIT, RESET_RATE_WINDOW_SECONDS, 'Too many password reset requests. Please try again later.');
+
+        // Maximum 3 reset requests in a rolling one-hour window for this ID/email pair.
+        await rateLimit_(
+            'reset',
+            idNumber + '|' + email,
+            RESET_RATE_LIMIT,
+            RESET_RATE_WINDOW_SECONDS,
+            'Too many password reset requests. Please try again later.'
+        );
 
         var result = await supabaseRequest(
             'GET',
@@ -1267,20 +1293,14 @@ async function requestPasswordReset(data) {
             };
         }
 
-        var otp = String(Math.floor(100000 + Math.random() * 900000));
+        var otp = String(crypto.randomInt(100000, 1000000));
         var otpHash = hashPassword(otp);
         var now = new Date();
+        var nowIso = now.toISOString();
         var expires = new Date(now.getTime() + 10 * 60 * 1000).toISOString();
 
-        // Invalidate previous active OTPs for this member.
-        await supabaseRequest(
-            'PATCH',
-            'password_reset_requests?member_id=eq.' +
-                encodeURIComponent(member.id) +
-                '&used_at=is.null',
-            { used_at: now.toISOString() }
-        );
-
+        // Create the new OTP first. The previous OTP remains usable until the new email
+        // is confirmed as successfully accepted by the email provider.
         var insert = await supabaseRequest(
             'POST',
             'password_reset_requests',
@@ -1289,23 +1309,57 @@ async function requestPasswordReset(data) {
                 otp_hash: otpHash,
                 attempts: 0,
                 expires_at: expires,
-                created_at: now.toISOString()
+                created_at: nowIso
             },
             { prefer: 'return=representation' }
         );
 
-        if (insert.statusCode < 200 || insert.statusCode >= 300) {
+        if (insert.statusCode < 200 || insert.statusCode >= 300 || !insert.data || !insert.data.length) {
+            Logger.log('OTP request insert failed: '+JSON.stringify({statusCode:insert.statusCode,data:insert.data}));
             throw new Error('Unable to create the password reset request.');
         }
 
-        await sendEmailNotification(
+        var newRequestId = insert.data[0].id;
+
+        var emailResult = await sendEmailNotification(
             registeredEmail,
             'Brightlife CBO Password Reset OTP',
             '<p>Dear ' + htmlEscape_(member.full_name || 'Member') + ',</p>' +
             '<p>Your Brightlife CBO password reset OTP is:</p>' +
             '<p style="font-size:28px;font-weight:700;letter-spacing:6px;">' + otp + '</p>' +
-            '<p>This code expires in 10 minutes. If you did not request a password reset, you can ignore this email.</p>'
+            '<p>This code expires in 10 minutes. If you did not request a password reset, you can ignore this email.</p>',
+            true
         );
+
+        if (!emailResult || emailResult.success !== true) {
+            // Do not leave an unsent OTP as the newest active request.
+            await supabaseRequest(
+                'PATCH',
+                'password_reset_requests?id=eq.' + encodeURIComponent(newRequestId) + '&used_at=is.null',
+                { used_at: new Date().toISOString() },
+                { prefer: 'return=minimal' }
+            );
+
+            var providerStatus = emailResult && emailResult.statusCode ? ' (email provider HTTP ' + emailResult.statusCode + ')' : '';
+            Logger.log('Password reset OTP email failed: '+JSON.stringify(emailResult));
+            throw new Error('The OTP could not be delivered. Please try again shortly.' + providerStatus);
+        }
+
+        // The new OTP has been accepted for delivery. Now invalidate older active OTPs.
+        var invalidatePrevious = await supabaseRequest(
+            'PATCH',
+            'password_reset_requests?member_id=eq.' +
+                encodeURIComponent(member.id) +
+                '&used_at=is.null&id=neq.' + encodeURIComponent(newRequestId),
+            { used_at: nowIso },
+            { prefer: 'return=minimal' }
+        );
+
+        if (invalidatePrevious.statusCode < 200 || invalidatePrevious.statusCode >= 300) {
+            // The newest OTP remains the latest active request and therefore remains usable.
+            // Log this maintenance issue without exposing the OTP.
+            Logger.log('Previous OTP cleanup failed: '+JSON.stringify({statusCode:invalidatePrevious.statusCode,data:invalidatePrevious.data,memberId:member.id}));
+        }
 
         return {
             success: true,
@@ -1313,7 +1367,10 @@ async function requestPasswordReset(data) {
         };
     } catch (e) {
         Logger.log('requestPasswordReset: ' + e.message);
-        return { success: false, message: 'Unable to send the password reset OTP.' };
+        return {
+            success: false,
+            message: e.message || 'Unable to send the password reset OTP.'
+        };
     }
 }
 
