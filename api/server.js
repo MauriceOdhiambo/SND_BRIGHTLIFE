@@ -178,44 +178,408 @@ async function sendWhatsAppAlert(phoneNumber,message){
     if(!response.ok){Logger.log('WhatsApp notification failed: '+await response.text());return false;} return true;
   }catch(e){Logger.log('Error sending WhatsApp alert: '+e.message);return false;}
 }
-async function sendEmailNotification(recipient,subject,htmlBody,returnDetails){
-  try{
-    const key=String(process.env.RESEND_API_KEY||'').trim();
-    const from=String(process.env.RESEND_FROM_EMAIL||'').trim();
-    if(!key||!from){
-      const detail={success:false,code:'EMAIL_NOT_CONFIGURED',message:'Email service is not configured.'};
-      Logger.log('Email provider not configured; email skipped.');
-      return returnDetails ? detail : false;
+function parseEmailList_(value) {
+  return String(value || '')
+    .split(/[;,\s]+/)
+    .map(function(v) { return String(v || '').trim().toLowerCase(); })
+    .filter(function(v) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v); });
+}
+
+/*
+ * Notification recipients are resolved automatically from member profiles
+ * and the rights assigned to those profiles.
+ *
+ * There is intentionally NO hard-coded recipient list and no requirement for
+ * NOTIFICATION_BCC_EMAILS. The members table is the source of truth:
+ *   - members.email = destination address
+ *   - members.is_active = account must be active
+ *   - members.role / members.permissions = determines which notifications
+ *     the person is responsible for receiving
+ */
+async function getNotificationResponsibleEmails_(requiredPermissions) {
+  try {
+    var permissionsNeeded = Array.isArray(requiredPermissions)
+      ? requiredPermissions.filter(function(v) { return String(v || '').trim(); })
+      : [];
+
+    var result = await supabaseRequest(
+      'GET',
+      'members?select=id,email,role,permissions,is_active&is_active=eq.true&limit=5000'
+    );
+
+    if (result.statusCode !== 200 || !Array.isArray(result.data)) {
+      Logger.log('Unable to load notification recipients from member profiles: ' + JSON.stringify(result.data));
+      return [];
     }
-    const r=await fetch('https://api.resend.com/emails',{
-      method:'POST',
-      headers:{Authorization:`Bearer ${key}`,'Content-Type':'application/json'},
-      body:JSON.stringify({
-        from,
-        to:[recipient],
-        bcc:['morisky2001@gmail.com'],
-        subject,
-        html:htmlBody,
-        text:String(htmlBody||'').replace(/<[^>]*>/g,' ')
-      })
+
+    var recipients = [];
+
+    result.data.forEach(function(member) {
+      var email = String(member.email || '').trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return;
+
+      var role = String(member.role || 'member').toLowerCase();
+      var effective = effectivePermissions_(role, member.permissions);
+
+      /*
+       * When specific rights are supplied, the profile must have at least
+       * one of those rights. Super Admin is automatically included through
+       * ROLE_PERMISSIONS/effectivePermissions_.
+       */
+      if (permissionsNeeded.length) {
+        var hasRequiredRight = permissionsNeeded.some(function(permission) {
+          return effective[String(permission)] === true;
+        });
+        if (!hasRequiredRight) return;
+      } else {
+        /*
+         * Generic operational notifications require at least one assigned
+         * operational right. Ordinary members therefore never receive
+         * management notifications merely because they have an email.
+         */
+        var hasOperationalRight = [
+          'registration_approval',
+          'savings_approval',
+          'loan_approval',
+          'withdrawal_approval',
+          'profile_approval',
+          'view_reports',
+          'customer_care'
+        ].some(function(permission) {
+          return effective[permission] === true;
+        });
+        if (!hasOperationalRight) return;
+      }
+
+      recipients.push(email);
     });
-    const responseText=await r.text();
-    if(!r.ok){
-      let providerMessage=responseText;
-      try{
-        const parsed=responseText?JSON.parse(responseText):{};
-        providerMessage=parsed.message||parsed.error||responseText;
-      }catch(_){ }
-      Logger.log('Email provider error HTTP '+r.status+': '+providerMessage);
-      const detail={success:false,code:'EMAIL_PROVIDER_ERROR',statusCode:r.status,message:String(providerMessage||'Email provider rejected the request.')};
-      return returnDetails ? detail : false;
-    }
-    return returnDetails ? {success:true,code:'EMAIL_SENT',statusCode:r.status} : true;
-  }catch(e){
-    Logger.log('Email error: '+e.message);
-    const detail={success:false,code:'EMAIL_REQUEST_FAILED',message:e.message||'Email request failed.'};
-    return returnDetails ? detail : false;
+
+    return uniqueStrings(recipients).map(function(v) {
+      return String(v).trim().toLowerCase();
+    });
+  } catch (e) {
+    Logger.log('Error resolving notification recipients from profiles: ' + e.message);
+    return [];
   }
+}
+
+/**
+ * Resolve the member's CURRENT registered email from the members profile.
+ *
+ * Member notifications must never rely on an email address supplied by the
+ * browser or an old in-memory object when a member record can be identified.
+ * The members table is the source of truth for the destination address.
+ */
+async function getMemberRegisteredEmail_(memberData) {
+  memberData = memberData || {};
+
+  var memberId =
+    memberData.id ||
+    memberData.member_id ||
+    memberData.memberId ||
+    '';
+
+  var uniqueMemberId =
+    memberData.unique_member_id ||
+    memberData.uniqueMemberId ||
+    memberData.uniqueId ||
+    '';
+
+  try {
+    var result = null;
+
+    if (memberId) {
+      result = await supabaseRequest(
+        'GET',
+        'members?select=id,email&id=eq.' +
+          encodeURIComponent(String(memberId)) +
+          '&limit=1'
+      );
+    } else if (uniqueMemberId) {
+      result = await supabaseRequest(
+        'GET',
+        'members?select=id,email&unique_member_id=eq.' +
+          encodeURIComponent(String(uniqueMemberId)) +
+          '&limit=1'
+      );
+    }
+
+    if (
+      result &&
+      result.statusCode === 200 &&
+      Array.isArray(result.data) &&
+      result.data.length
+    ) {
+      var registeredEmail = String(
+        result.data[0].email || ''
+      ).trim().toLowerCase();
+
+      if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(registeredEmail)) {
+        return registeredEmail;
+      }
+
+      Logger.log(
+        'Member profile has no valid registered email: ' +
+        String(memberId || uniqueMemberId)
+      );
+      return '';
+    }
+
+    /*
+     * Compatibility fallback: some existing backend calls may already have
+     * a trusted member record containing its email but no member ID. This is
+     * not used when a member ID/unique member ID is available.
+     */
+    var fallbackEmail = String(memberData.email || '')
+      .trim()
+      .toLowerCase();
+
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(fallbackEmail)) {
+      Logger.log(
+        'Using trusted member-data email because no member identifier was supplied.'
+      );
+      return fallbackEmail;
+    }
+
+    return '';
+  } catch (e) {
+    Logger.log(
+      'Unable to resolve member registered email: ' + e.message
+    );
+    return '';
+  }
+}
+
+/**
+ * Send a member-facing notification to the email stored in the member's
+ * profile. Responsible staff are selected automatically from active profiles using their assigned notification rights.
+ */
+async function sendMemberNotification_(memberData, subject, htmlBody, options) {
+  options = options || {};
+
+  var registeredEmail = await getMemberRegisteredEmail_(memberData);
+
+  if (!registeredEmail) {
+    Logger.log(
+      'Member notification skipped: no registered profile email found.'
+    );
+    return options.returnDetails
+      ? {
+          success: false,
+          code: 'MEMBER_EMAIL_NOT_FOUND',
+          message: 'The member has no valid registered email address.'
+        }
+      : false;
+  }
+
+  return await sendEmailNotification(
+    registeredEmail,
+    subject,
+    htmlBody,
+    {
+      returnDetails: options.returnDetails === true,
+      requireResponsibleBcc: options.requireResponsibleBcc !== false,
+      responsibleEmails: options.responsibleEmails || [],
+      skipBcc: options.skipBcc === true
+    }
+  );
+}
+
+async function sendEmailNotification(recipient, subject, htmlBody, options) {
+  try {
+    options = options || {};
+
+    const key = String(process.env.RESEND_API_KEY || '').trim();
+    const from = String(
+      process.env.RESEND_FROM_EMAIL || 'noreply@brightlifesnd.com'
+    ).trim();
+
+    /*
+     * RESEND_REPLY_TO_EMAIL is intentionally blank for this production setup.
+     * Do not add a Reply-To header unless the environment variable is
+     * explicitly populated in Vercel.
+     */
+    const replyTo = String(
+      process.env.RESEND_REPLY_TO_EMAIL || ''
+    ).trim();
+
+    if (!key || !from) {
+      const detail = {
+        success: false,
+        code: 'EMAIL_NOT_CONFIGURED',
+        message: 'Email service is not configured.'
+      };
+
+      Logger.log('Email provider not configured; email skipped.');
+      return options.returnDetails ? detail : false;
+    }
+
+    const to = parseEmailList_(recipient);
+
+    if (!to.length) {
+      const detail = {
+        success: false,
+        code: 'EMAIL_RECIPIENT_INVALID',
+        message: 'No valid email recipient was supplied.'
+      };
+
+      Logger.log('Email skipped: invalid recipient.');
+      return options.returnDetails ? detail : false;
+    }
+
+    let bcc = [];
+
+    /*
+     * Normal notifications are copied to the responsible operational
+     * recipients. Password-reset OTPs explicitly disable BCC because OTPs
+     * are authentication secrets and must only go to the intended member.
+     */
+    if (options.skipBcc !== true) {
+      bcc = parseEmailList_(options.responsibleEmails || []);
+
+      if (!bcc.length && options.requireResponsibleBcc === true) {
+        const detail = {
+          success: false,
+          code: 'NOTIFICATION_RECIPIENTS_NOT_CONFIGURED',
+          message: 'Responsible notification email addresses are not configured.'
+        };
+
+        Logger.log(
+          'Notification blocked: no responsible profiles with the required assigned rights were found.'
+        );
+
+        return options.returnDetails ? detail : false;
+      }
+    }
+
+    /*
+     * Never send the same address in both To and BCC.
+     */
+    const toSet = new Set(
+      to.map(function(v) {
+        return String(v).toLowerCase();
+      })
+    );
+
+    bcc = uniqueStrings(bcc).filter(function(v) {
+      return !toSet.has(String(v).toLowerCase());
+    });
+
+    const payload = {
+      from,
+      to,
+      subject,
+      html: htmlBody,
+      text: String(htmlBody || '').replace(/<[^>]*>/g, ' ')
+    };
+
+    if (bcc.length) {
+      payload.bcc = bcc;
+    }
+
+    if (replyTo) {
+      payload.reply_to = replyTo;
+    }
+
+    Logger.log('Sending email notification: ' + JSON.stringify({
+      from,
+      to,
+      bccCount: bcc.length,
+      subject
+    }));
+
+    const r = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const responseText = await r.text();
+
+    if (!r.ok) {
+      let providerMessage = responseText;
+
+      try {
+        const parsed = responseText ? JSON.parse(responseText) : {};
+        providerMessage =
+          parsed.message ||
+          parsed.error ||
+          responseText;
+      } catch (_) {}
+
+      Logger.log(
+        'Email provider error HTTP ' +
+        r.status +
+        ': ' +
+        providerMessage
+      );
+
+      const detail = {
+        success: false,
+        code: 'EMAIL_PROVIDER_ERROR',
+        statusCode: r.status,
+        message: String(
+          providerMessage ||
+          'Email provider rejected the request.'
+        )
+      };
+
+      return options.returnDetails ? detail : false;
+    }
+
+    return options.returnDetails
+      ? {
+          success: true,
+          code: 'EMAIL_SENT',
+          statusCode: r.status
+        }
+      : true;
+
+  } catch (e) {
+    Logger.log('Email error: ' + e.message);
+
+    const detail = {
+      success: false,
+      code: 'EMAIL_REQUEST_FAILED',
+      message: e.message || 'Email request failed.'
+    };
+
+    return options && options.returnDetails ? detail : false;
+  }
+}
+
+/*
+ * Action-required notifications are sent to active member profiles whose
+ * assigned rights match the notification type.
+ */
+async function sendResponsibleAdminNotification_(subject, htmlBody, options) {
+  options = options || {};
+
+  var responsibleEmails = await getNotificationResponsibleEmails_(
+    options.requiredPermissions || []
+  );
+
+  if (!responsibleEmails.length) {
+    Logger.log(
+      'No active member profiles have the required notification rights: ' +
+      JSON.stringify(options.requiredPermissions || [])
+    );
+    return false;
+  }
+
+  return await sendEmailNotification(
+    responsibleEmails,
+    subject,
+    htmlBody,
+    {
+      skipBcc: true,
+      requireResponsibleBcc: false,
+      responsibleEmails: []
+    }
+  );
 }
 
 function numberValue(value) {
@@ -1382,7 +1746,7 @@ async function requestPasswordReset(data) {
             '<p>Your Brightlife CBO password reset OTP is:</p>' +
             '<p style="font-size:28px;font-weight:700;letter-spacing:6px;">' + otp + '</p>' +
             '<p>This code expires in 10 minutes. If you did not request a password reset, you can ignore this email.</p>',
-            true
+            { returnDetails: true, skipBcc: true }
         );
 
         if (!emailResult || emailResult.success !== true) {
@@ -4956,23 +5320,7 @@ async function sendDailySummaryEmail() {
         var subject = '📊 Daily Summary - ' + dateStr;
         var htmlBody = generateSummaryTable('DAILY SUMMARY', dateStr + ' at ' + timeStr, tableData);
         
-        var adminsResult = await supabaseRequest('GET', 'members?select=email&role=in.(admin,super_admin)&is_active=eq.true&email=not.is.null');
-        var adminEmails = [];
-        if (adminsResult.statusCode === 200 && adminsResult.data) {
-            for (var a = 0; a < adminsResult.data.length; a++) {
-                if (adminsResult.data[a].email) {
-                    adminEmails.push(adminsResult.data[a].email);
-                }
-            }
-        }
-        
-        if (adminEmails.length > 0) {
-            for (var e = 0; e < adminEmails.length; e++) {
-                await sendEmailNotification(adminEmails[e], subject, htmlBody);
-            }
-        } else {
-            await sendEmailNotification('morisky2001@gmail.com', subject, htmlBody);
-        }
+        await sendResponsibleAdminNotification_(subject, htmlBody, { requiredPermissions: ['view_reports'] });
         
         Logger.log('Daily summary email sent');
         return { success: true, message: 'Daily summary sent' };
@@ -5044,23 +5392,7 @@ async function sendWeeklySummaryEmail() {
         var subject = '📊 Weekly Summary - ' + dateRange;
         var htmlBody = generateSummaryTable('WEEKLY SUMMARY', dateRange, tableData);
         
-        var allMembersResult = await supabaseRequest('GET', 'members?select=email&is_active=eq.true&email=not.is.null');
-        var memberEmails = [];
-        if (allMembersResult.statusCode === 200 && allMembersResult.data) {
-            for (var m = 0; m < allMembersResult.data.length; m++) {
-                if (allMembersResult.data[m].email) {
-                    memberEmails.push(allMembersResult.data[m].email);
-                }
-            }
-        }
-        
-        if (memberEmails.length > 0) {
-            for (var e = 0; e < memberEmails.length; e++) {
-                await sendEmailNotification(memberEmails[e], subject, htmlBody);
-            }
-        } else {
-            await sendEmailNotification('morisky2001@gmail.com', subject, htmlBody);
-        }
+        await sendResponsibleAdminNotification_(subject, htmlBody, { requiredPermissions: ['view_reports'] });
         
         Logger.log('Weekly summary email sent');
         return { success: true, message: 'Weekly summary sent' };
@@ -5140,23 +5472,7 @@ async function sendMonthlySummaryEmail() {
         var subject = '📊 Monthly Summary - ' + monthName;
         var htmlBody = generateSummaryTable('MONTHLY SUMMARY', monthName, tableData);
         
-        var allMembersResult = await supabaseRequest('GET', 'members?select=email&is_active=eq.true&email=not.is.null');
-        var memberEmails = [];
-        if (allMembersResult.statusCode === 200 && allMembersResult.data) {
-            for (var m = 0; m < allMembersResult.data.length; m++) {
-                if (allMembersResult.data[m].email) {
-                    memberEmails.push(allMembersResult.data[m].email);
-                }
-            }
-        }
-        
-        if (memberEmails.length > 0) {
-            for (var e = 0; e < memberEmails.length; e++) {
-                await sendEmailNotification(memberEmails[e], subject, htmlBody);
-            }
-        } else {
-            await sendEmailNotification('morisky2001@gmail.com', subject, htmlBody);
-        }
+        await sendResponsibleAdminNotification_(subject, htmlBody, { requiredPermissions: ['view_reports'] });
         
         Logger.log('Monthly summary email sent');
         return { success: true, message: 'Monthly summary sent' };
@@ -5197,19 +5513,7 @@ async function sendOverdueLoansAlert() {
         
         var htmlBody = generateSummaryTable('🚨 OVERDUE LOANS', formatKenyaDate_(new Date()), tableData);
         
-        var adminsResult = await supabaseRequest('GET', 'members?select=email&role=in.(admin,super_admin)&is_active=eq.true&email=not.is.null');
-        var adminEmails = [];
-        if (adminsResult.statusCode === 200 && adminsResult.data) {
-            for (var a = 0; a < adminsResult.data.length; a++) {
-                if (adminsResult.data[a].email) {
-                    adminEmails.push(adminsResult.data[a].email);
-                }
-            }
-        }
-        
-        for (var e = 0; e < adminEmails.length; e++) {
-            await sendEmailNotification(adminEmails[e], subject, htmlBody);
-        }
+        await sendResponsibleAdminNotification_(subject, htmlBody, { requiredPermissions: ['loan_approval'] });
         
         for (var lo = 0; lo < overdueLoans.length; lo++) {
             var loan = overdueLoans[lo];
@@ -5223,7 +5527,7 @@ async function sendOverdueLoansAlert() {
                     { label: '💰 Amount', value: 'KES ' + (loan.amount || 0).toFixed(2) }
                 ];
                 var borrowerHtml = generateSummaryTable('⚠️ LOAN OVERDUE NOTICE', 'Dear ' + member.full_name, borrowerTableData);
-                await sendEmailNotification(member.email, '⚠️ Your Loan is Overdue', borrowerHtml);
+                await sendMemberNotification_(member, '⚠️ Your Loan is Overdue', borrowerHtml, { requireResponsibleBcc: true, responsibleEmails: await getNotificationResponsibleEmails_(['loan_approval']) });
             }
         }
         
@@ -5287,19 +5591,13 @@ async function sendPendingApprovalsReminder() {
         var subject = '⏳ Pending Approvals Reminder - ' + totalPending + ' items';
         var htmlBody = generateSummaryTable('📋 PENDING APPROVALS', formatKenyaDate_(new Date()), tableData);
         
-        var adminsResult = await supabaseRequest('GET', 'members?select=email&role=in.(admin,super_admin)&is_active=eq.true&email=not.is.null');
-        var adminEmails = [];
-        if (adminsResult.statusCode === 200 && adminsResult.data) {
-            for (var a = 0; a < adminsResult.data.length; a++) {
-                if (adminsResult.data[a].email) {
-                    adminEmails.push(adminsResult.data[a].email);
-                }
-            }
-        }
-        
-        for (var e = 0; e < adminEmails.length; e++) {
-            await sendEmailNotification(adminEmails[e], subject, htmlBody);
-        }
+        var pendingRights = [];
+        if (pendingRegistrations > 0) pendingRights.push('registration_approval');
+        if (pendingTransactions > 0) pendingRights.push('savings_approval');
+        if (pendingLoans > 0) pendingRights.push('loan_approval');
+        if (pendingWithdrawals > 0) pendingRights.push('withdrawal_approval');
+        if (pendingProfileEdits > 0) pendingRights.push('profile_approval');
+        await sendResponsibleAdminNotification_(subject, htmlBody, { requiredPermissions: pendingRights });
         
         Logger.log('Pending approvals reminder sent');
         return { success: true, message: 'Pending approvals reminder sent' };
@@ -5321,9 +5619,7 @@ async function sendAccountActivationEmail(memberData) {
     var subject = '✅ Account Activated - Welcome to Brightlife CBO!';
     var htmlBody = generateSummaryTable('🎉 ACCOUNT ACTIVATED', 'Welcome ' + memberData.full_name, tableData);
     
-    if (memberData.email) {
-        await sendEmailNotification(memberData.email, subject, htmlBody);
-    }
+    await sendMemberNotification_(memberData, subject, htmlBody, { requireResponsibleBcc: true, responsibleEmails: await getNotificationResponsibleEmails_(['registration_approval']) });
 }
 
 async function sendSavingsApprovedEmail(memberData, amount, newBalance) {
@@ -5338,9 +5634,7 @@ async function sendSavingsApprovedEmail(memberData, amount, newBalance) {
     var subject = '✅ Savings Approved - KES ' + amount.toFixed(2);
     var htmlBody = generateSummaryTable('💰 SAVINGS DEPOSIT APPROVED', formatKenyaDate_(new Date()), tableData);
     
-    if (memberData.email) {
-        await sendEmailNotification(memberData.email, subject, htmlBody);
-    }
+    await sendMemberNotification_(memberData, subject, htmlBody, { requireResponsibleBcc: true, responsibleEmails: await getNotificationResponsibleEmails_(['savings_approval']) });
 }
 
 async function sendRegistrationAlert(memberData) {
@@ -5356,7 +5650,7 @@ async function sendRegistrationAlert(memberData) {
     var subject = '🔔 New Registration - ' + memberData.fullName;
     var htmlBody = generateSummaryTable('📝 NEW MEMBER REGISTRATION', formatKenyaDateTime_(new Date()), tableData);
     
-    await sendEmailNotification(CONFIG.ADMIN_WHATSAPP, subject, htmlBody);
+    await sendResponsibleAdminNotification_(subject, htmlBody, { requiredPermissions: ['registration_approval'] });
 }
 
 async function sendWithdrawalAlert(memberData, amount, phone) {
@@ -5371,7 +5665,7 @@ async function sendWithdrawalAlert(memberData, amount, phone) {
     var subject = '🏦 Withdrawal Request - ' + memberData.full_name;
     var htmlBody = generateSummaryTable('🏦 WITHDRAWAL REQUEST', 'Pending Approval', tableData);
     
-    await sendEmailNotification(CONFIG.ADMIN_WHATSAPP, subject, htmlBody);
+    await sendResponsibleAdminNotification_(subject, htmlBody, { requiredPermissions: ['withdrawal_approval'] });
 }
 
 function testHashFunction() {
@@ -5862,6 +6156,7 @@ const FUNCTIONS = {
   getReportData: getReportData,
   sendWhatsAppAlert,
   sendEmailNotification,
+  sendMemberNotification_: sendMemberNotification_,
   generateReportPdf,
   setupDailySummaryTrigger,
   setupWeeklySummaryTrigger,
