@@ -42,6 +42,60 @@ function formatDate_(date, timezone, pattern) {
     .replace(/yyyy/g, parts.year).replace(/MM/g, parts.month).replace(/dd/g, parts.day)
     .replace(/HH/g, parts.hour).replace(/mm/g, parts.minute).replace(/ss/g, parts.second);
 }
+
+const KENYA_TIME_ZONE = 'Africa/Nairobi';
+
+function formatKenyaDate_(date) {
+  const d = date instanceof Date ? date : new Date(date);
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: KENYA_TIME_ZONE,
+    month: 'numeric',
+    day: 'numeric',
+    year: 'numeric'
+  }).format(d);
+}
+
+function formatKenyaTime_(date) {
+  const d = date instanceof Date ? date : new Date(date);
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: KENYA_TIME_ZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true
+  }).format(d);
+}
+
+function formatKenyaDateTime_(date) {
+  const d = date instanceof Date ? date : new Date(date);
+  return formatKenyaDate_(d) + ' at ' + formatKenyaTime_(d);
+}
+
+function formatKenyaMonth_(date) {
+  const d = date instanceof Date ? date : new Date(date);
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: KENYA_TIME_ZONE,
+    month: 'long',
+    year: 'numeric'
+  }).format(d);
+}
+
+// Returns the UTC instants corresponding to midnight and 23:59:59.999
+// for the current Kenya calendar day. Database timestamps remain UTC.
+function getKenyaDayRange_(date) {
+  const d = date instanceof Date ? date : new Date(date);
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: KENYA_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(d).reduce((o, p) => (o[p.type] = p.value, o), {});
+  const datePrefix = parts.year + '-' + parts.month + '-' + parts.day;
+  return {
+    start: new Date(datePrefix + 'T00:00:00+03:00'),
+    end: new Date(datePrefix + 'T23:59:59.999+03:00')
+  };
+}
 const Utilities = {
   DigestAlgorithm: { SHA_256: 'SHA-256' }, Charset: { UTF_8: 'UTF-8' },
   computeDigest: (_alg, value) => Array.from(crypto.createHash('sha256').update(String(value || ''),'utf8').digest()).map(b => b > 127 ? b - 256 : b),
@@ -2308,7 +2362,7 @@ async function approveLoan(data) {
                 'Repayment Period: ' + loan.repayment_period + '\n' +
                 'Interest: ' + (loan.interest_rate * 100) + '%\n' +
                 'Total Repayment: KES ' + (loan.total_repayment || loan.amount * (1 + loan.interest_rate)).toFixed(2) + '\n' +
-                'Due Date: ' + new Date(loan.repayment_due_date).toLocaleDateString()
+                'Due Date: ' + formatKenyaDate_(new Date(loan.repayment_due_date))
             );
         }
         
@@ -4593,7 +4647,7 @@ async function sendDailySummary() {
         const pendingProfileEditsResult = await supabaseRequest('GET', 'biodata_approvals?select=count&status=eq.pending&request_type=eq.profile_edit');
         const pendingProfileEdits = pendingProfileEditsResult.statusCode === 200 && pendingProfileEditsResult.data ? pendingProfileEditsResult.data[0]?.count || 0 : 0;
         
-        let message = '📊 DAILY SUMMARY - ' + new Date().toLocaleDateString() + '\n\n';
+        let message = '📊 DAILY SUMMARY - ' + formatKenyaDate_(new Date()) + '\n\n';
         message += '💰 Savings: KES ' + totalSavings + '\n';
         message += '💳 Repayments: KES ' + totalRepayments + '\n';
         message += '👤 New Members: ' + (newMembers ? newMembers.length : 0) + '\n';
@@ -4822,22 +4876,11 @@ function generateSummaryTable(title, subtitle, data) {
 async function sendDailySummaryEmail() {
     try {
         var today = new Date();
-        var dateStr = today.toLocaleDateString('en-US', { 
-            month: 'numeric', 
-            day: 'numeric', 
-            year: 'numeric' 
-        });
-        var timeStr = today.toLocaleTimeString('en-US', { 
-            hour: '2-digit', 
-            minute: '2-digit', 
-            second: '2-digit',
-            hour12: true 
-        });
-        
-        var todayStart = new Date(today);
-        todayStart.setHours(0, 0, 0, 0);
-        var todayEnd = new Date(today);
-        todayEnd.setHours(23, 59, 59, 999);
+        var dateStr = formatKenyaDate_(today);
+        var timeStr = formatKenyaTime_(today);
+        var kenyaDay = getKenyaDayRange_(today);
+        var todayStart = kenyaDay.start;
+        var todayEnd = kenyaDay.end;
         
         var membersResult = await supabaseRequest('GET', 'members?select=*');
         var allMembers = membersResult.statusCode === 200 ? membersResult.data : [];
@@ -4943,17 +4986,18 @@ async function sendDailySummaryEmail() {
 async function sendWeeklySummaryEmail() {
     try {
         var today = new Date();
-        var weekStart = new Date(today);
-        weekStart.setDate(weekStart.getDate() - 7);
+        var weekStart = new Date(today.getTime() - (7 * 24 * 60 * 60 * 1000));
         
-        var dateRange = weekStart.toLocaleDateString('en-US', { 
-            month: 'short', 
-            day: 'numeric' 
-        }) + ' - ' + today.toLocaleDateString('en-US', { 
-            month: 'short', 
-            day: 'numeric', 
-            year: 'numeric' 
-        });
+        var dateRange = new Intl.DateTimeFormat('en-US', {
+            timeZone: KENYA_TIME_ZONE,
+            month: 'short',
+            day: 'numeric'
+        }).format(weekStart) + ' - ' + new Intl.DateTimeFormat('en-US', {
+            timeZone: KENYA_TIME_ZONE,
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric'
+        }).format(today);
         
         var transResult = await supabaseRequest('GET', 
             'transactions?select=*&created_at=gte.' + weekStart.toISOString()
@@ -5030,8 +5074,14 @@ async function sendWeeklySummaryEmail() {
 async function sendMonthlySummaryEmail() {
     try {
         var today = new Date();
-        var monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-        var monthName = today.toLocaleString('default', { month: 'long', year: 'numeric' });
+        var kenyaParts = new Intl.DateTimeFormat('en-CA', {
+            timeZone: KENYA_TIME_ZONE,
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit'
+        }).formatToParts(today).reduce((o, p) => (o[p.type] = p.value, o), {});
+        var monthStart = new Date(kenyaParts.year + '-' + kenyaParts.month + '-01T00:00:00+03:00');
+        var monthName = formatKenyaMonth_(today);
         
         var transResult = await supabaseRequest('GET', 
             'transactions?select=*&created_at=gte.' + monthStart.toISOString()
@@ -5145,7 +5195,7 @@ async function sendOverdueLoansAlert() {
             });
         }
         
-        var htmlBody = generateSummaryTable('🚨 OVERDUE LOANS', new Date().toLocaleDateString(), tableData);
+        var htmlBody = generateSummaryTable('🚨 OVERDUE LOANS', formatKenyaDate_(new Date()), tableData);
         
         var adminsResult = await supabaseRequest('GET', 'members?select=email&role=in.(admin,super_admin)&is_active=eq.true&email=not.is.null');
         var adminEmails = [];
@@ -5168,7 +5218,7 @@ async function sendOverdueLoansAlert() {
                 var dueDate = new Date(loan.repayment_due_date);
                 var daysOverdue = Math.floor((today - dueDate) / (1000 * 60 * 60 * 24));
                 var borrowerTableData = [
-                    { label: '📅 Due Date', value: dueDate.toLocaleDateString() },
+                    { label: '📅 Due Date', value: formatKenyaDate_(dueDate) },
                     { label: '⏰ Days Overdue', value: daysOverdue + ' days' },
                     { label: '💰 Amount', value: 'KES ' + (loan.amount || 0).toFixed(2) }
                 ];
@@ -5235,7 +5285,7 @@ async function sendPendingApprovalsReminder() {
         ];
         
         var subject = '⏳ Pending Approvals Reminder - ' + totalPending + ' items';
-        var htmlBody = generateSummaryTable('📋 PENDING APPROVALS', new Date().toLocaleDateString(), tableData);
+        var htmlBody = generateSummaryTable('📋 PENDING APPROVALS', formatKenyaDate_(new Date()), tableData);
         
         var adminsResult = await supabaseRequest('GET', 'members?select=email&role=in.(admin,super_admin)&is_active=eq.true&email=not.is.null');
         var adminEmails = [];
@@ -5286,7 +5336,7 @@ async function sendSavingsApprovedEmail(memberData, amount, newBalance) {
     ];
     
     var subject = '✅ Savings Approved - KES ' + amount.toFixed(2);
-    var htmlBody = generateSummaryTable('💰 SAVINGS DEPOSIT APPROVED', new Date().toLocaleDateString(), tableData);
+    var htmlBody = generateSummaryTable('💰 SAVINGS DEPOSIT APPROVED', formatKenyaDate_(new Date()), tableData);
     
     if (memberData.email) {
         await sendEmailNotification(memberData.email, subject, htmlBody);
@@ -5300,11 +5350,11 @@ async function sendRegistrationAlert(memberData) {
         { label: '📱 Phone', value: memberData.phoneNumber },
         { label: '📧 Email', value: memberData.email || 'N/A' },
         { label: '🆔 Member ID', value: memberData.uniqueId },
-        { label: '📅 Date', value: new Date().toLocaleString() }
+        { label: '📅 Date', value: formatKenyaDateTime_(new Date()) }
     ];
     
     var subject = '🔔 New Registration - ' + memberData.fullName;
-    var htmlBody = generateSummaryTable('📝 NEW MEMBER REGISTRATION', new Date().toLocaleString(), tableData);
+    var htmlBody = generateSummaryTable('📝 NEW MEMBER REGISTRATION', formatKenyaDateTime_(new Date()), tableData);
     
     await sendEmailNotification(CONFIG.ADMIN_WHATSAPP, subject, htmlBody);
 }
@@ -5315,7 +5365,7 @@ async function sendWithdrawalAlert(memberData, amount, phone) {
         { label: '🆔 Member ID', value: memberData.unique_member_id },
         { label: '💰 Amount', value: 'KES ' + amount.toFixed(2) },
         { label: '📱 Phone', value: phone || 'N/A' },
-        { label: '📅 Date', value: new Date().toLocaleString() }
+        { label: '📅 Date', value: formatKenyaDateTime_(new Date()) }
     ];
     
     var subject = '🏦 Withdrawal Request - ' + memberData.full_name;
@@ -5670,8 +5720,8 @@ async function generateReportPdf(data){
       const repayments=reps.reduce((a,t)=>a+numberValue(t.amount),0);
       const loaned=loans.reduce((a,t)=>a+numberValue(t.amount),0);
       doc.fontSize(10).text(`Savings balance: ${formatKes(m.savings_balance)}`);doc.text(`Total savings: ${formatKes(savings)}`);doc.text(`Loans taken: ${formatKes(loaned)}`);doc.text(`Repayments: ${formatKes(repayments)}`);doc.moveDown();
-      doc.fontSize(11).text('Loan History');loans.slice(0,100).forEach(l=>doc.fontSize(8).text(`${new Date(l.application_date||l.created_at).toLocaleDateString('en-KE')} | ${formatKes(l.amount)} | ${l.status||''} | Due ${formatKes(l.total_repayment)}`));doc.moveDown();
-      doc.fontSize(11).text('Recent Transactions');tx.slice(0,100).forEach(t=>doc.fontSize(8).text(`${new Date(t.created_at).toLocaleDateString('en-KE')} | ${t.type||''} | ${formatKes(t.amount)} | ${t.status||''} | ${t.mpesa_code||''}`));
+      doc.fontSize(11).text('Loan History');loans.slice(0,100).forEach(l=>doc.fontSize(8).text(`${formatKenyaDate_(new Date(l.application_date||l.created_at))} | ${formatKes(l.amount)} | ${l.status||''} | Due ${formatKes(l.total_repayment)}`));doc.moveDown();
+      doc.fontSize(11).text('Recent Transactions');tx.slice(0,100).forEach(t=>doc.fontSize(8).text(`${formatKenyaDate_(new Date(t.created_at))} | ${t.type||''} | ${formatKes(t.amount)} | ${t.status||''} | ${t.mpesa_code||''}`));
     }
     doc.end(); await done; const base64=Buffer.concat(chunks).toString('base64');
     const id=report.organization?'organization':(report.member?.unique_member_id||'member');
