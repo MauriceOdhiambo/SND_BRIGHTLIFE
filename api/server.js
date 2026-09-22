@@ -4595,7 +4595,7 @@ async function adminAddExistingMember(data) {
         var joiningDate = String(data.joiningDate || '').trim();
         var email = String(data.email || '').trim();
         var openingSavings = numberValue(data.openingSavings);
-        if (!fullName || !idNumber || !phoneNumber || !joiningDate) throw new Error('Full name, National ID, phone number and joining date are required.');
+        if (!fullName || !idNumber || !phoneNumber || !joiningDate) throw new Error('Full name, National ID, phone number and original joining date are required for an existing member.');
         if (openingSavings < 0) throw new Error('Opening savings cannot be negative.');
         var join = new Date(joiningDate + 'T00:00:00');
         if (isNaN(join.getTime())) throw new Error('Enter a valid joining date.');
@@ -4777,7 +4777,7 @@ async function findLoanForImport_(memberRef,loanRef){
 
 async function importOneRow_(type,row,actor){
     if(type==='existing_members'){
-        var result=await adminAddExistingMember({actorId:actor.id,sessionToken:arguments[3],fullName:row.full_name,idNumber:row.id_number,phoneNumber:row.phone_number,email:row.email,joiningDate:row.joining_date,openingSavings:row.opening_savings,occupation:row.occupation,address:row.address,nextOfKin:row.next_of_kin,nextOfKinPhone:row.next_of_kin_phone,nextOfKinRelation:row.next_of_kin_relation,sendWelcome:false});
+        var joiningDate=String(row.joining_date||'').trim(); if(!joiningDate) throw new Error('Original joining date is required for existing member imports.'); var result=await adminAddExistingMember({actorId:actor.id,sessionToken:arguments[3],fullName:row.full_name,idNumber:row.id_number,phoneNumber:row.phone_number,email:row.email,joiningDate:joiningDate,openingSavings:row.opening_savings,occupation:row.occupation,address:row.address,nextOfKin:row.next_of_kin,nextOfKinPhone:row.next_of_kin_phone,nextOfKinRelation:row.next_of_kin_relation,sendWelcome:false});
         if(!result.success)throw new Error(result.message||'Member could not be imported.');
         return result;
     }
