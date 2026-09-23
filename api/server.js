@@ -7,9 +7,9 @@ import crypto from 'node:crypto';
 const CONFIG = {
   SUPABASE_URL: process.env.SUPABASE_URL || 'https://kzikcysagysqyezferlr.supabase.co',
   SUPABASE_SECRET_KEY: process.env.SUPABASE_SECRET_KEY || '',
-  ADMIN_WHATSAPP: process.env.ADMIN_WHATSAPP || '+254111640106',
+  ADMIN_WHATSAPP: process.env.ADMIN_WHATSAPP || '+254711765739',
   PAYBILL_NUMBER: process.env.PAYBILL_NUMBER || '247247',
-  PAYBILL_ACCOUNT: process.env.PAYBILL_ACCOUNT || '0960179935983',
+  PAYBILL_ACCOUNT: process.env.PAYBILL_ACCOUNT || '+254711765739',
   REGISTRATION_FEE: 500,
   MIN_SAVINGS_MONTHS: 3,
   MAX_LOAN_MULTIPLIER: 3,
@@ -6167,7 +6167,7 @@ const FUNCTIONS = {
   healthCheck
 };
 
-const PUBLIC_FUNCTIONS = new Set(['healthCheck','loginMember','registerMember','requestPasswordReset','resetPasswordWithOtp','logoutMember']);
+const PUBLIC_FUNCTIONS = new Set(['healthCheck','loginMember','registerMember','requestPasswordReset','resetPasswordWithOtp','logoutMember','getPublishedSiteContent']);
 
 async function healthCheck(){
   const r=await supabaseRequest('GET','members?select=id&limit=1');
