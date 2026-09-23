@@ -2351,6 +2351,180 @@ body.member-session-active #publicProjectPage .brightlife-selected-project {
     min-height:0 !important;
 }
 </style>
+
+<style id="snd-workspace-final-stability">
+/* ==========================================================
+   SECURE WORKSPACE STABILITY
+   One stacking context for the member/admin workspace.
+   ========================================================== */
+
+/* All dialogs must sit above the sticky member topbar/account menu. */
+.modal-overlay{
+    position:fixed !important;
+    inset:0 !important;
+    z-index:20000 !important;
+    display:flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+    padding:24px !important;
+    box-sizing:border-box !important;
+    overflow-y:auto !important;
+    background:rgba(15,23,42,.58) !important;
+    backdrop-filter:blur(4px) !important;
+}
+
+.modal-overlay .modal{
+    position:relative !important;
+    z-index:20001 !important;
+    width:min(720px,96vw) !important;
+    max-width:96vw !important;
+    max-height:calc(100dvh - 48px) !important;
+    overflow:auto !important;
+    margin:auto !important;
+}
+
+/* Customer-care conversation modal: fixed header, scrollable conversation,
+   fixed composer inside the modal. */
+.modal-overlay .chat-reply-modal{
+    width:min(920px,96vw) !important;
+    height:min(760px,calc(100dvh - 48px)) !important;
+    max-height:calc(100dvh - 48px) !important;
+    display:flex !important;
+    flex-direction:column !important;
+    overflow:hidden !important;
+    padding:0 !important;
+    margin:auto !important;
+}
+
+.chat-reply-modal .chat-modal-header{
+    flex:0 0 auto !important;
+    position:relative !important;
+    z-index:2 !important;
+}
+
+.chat-reply-modal #chatReplyMessages{
+    flex:1 1 auto !important;
+    min-height:0 !important;
+    max-height:none !important;
+    overflow-y:auto !important;
+    overflow-x:hidden !important;
+    padding:22px !important;
+    scroll-behavior:smooth !important;
+}
+
+.chat-reply-modal .chat-reply-composer{
+    flex:0 0 auto !important;
+    margin:0 !important;
+    border:0 !important;
+    border-top:1px solid #e5e7eb !important;
+    border-radius:0 !important;
+    box-shadow:0 -6px 20px rgba(15,23,42,.06) !important;
+}
+
+.chat-reply-modal .chat-reply-composer textarea{
+    resize:vertical !important;
+    max-height:180px !important;
+}
+
+.chat-reply-modal .chat-message-row{
+    max-width:min(78%,720px) !important;
+}
+
+.member-topbar{
+    z-index:5000 !important;
+}
+
+.account-menu{
+    z-index:15000 !important;
+}
+
+@media(max-width:700px){
+    .modal-overlay{
+        padding:10px !important;
+        align-items:center !important;
+    }
+
+    .modal-overlay .chat-reply-modal{
+        width:100% !important;
+        height:calc(100dvh - 20px) !important;
+        max-height:calc(100dvh - 20px) !important;
+        border-radius:16px !important;
+    }
+
+    .chat-reply-modal #chatReplyMessages{
+        padding:14px !important;
+    }
+
+    .chat-reply-modal .chat-message-row{
+        max-width:94% !important;
+    }
+}
+
+@media(max-height:620px){
+    .modal-overlay .chat-reply-modal{
+        height:calc(100dvh - 16px) !important;
+        max-height:calc(100dvh - 16px) !important;
+    }
+}
+</style>
+
+
+<style id="snd-workspace-professional-v4">
+/* Admin/member pages use the same stable content frame. */
+#dashboard:not(.brightlife-public-mode) #dashboardContent{
+    min-width:0 !important;
+    width:100% !important;
+    box-sizing:border-box !important;
+}
+#dashboard:not(.brightlife-public-mode) .dashboard-body{
+    width:100% !important;
+    max-width:1400px !important;
+    margin:0 auto !important;
+    box-sizing:border-box !important;
+}
+#dashboard:not(.brightlife-public-mode) .settings-table-wrap,
+#dashboard:not(.brightlife-public-mode) .table-scroll{
+    max-width:100% !important;
+    overflow-x:auto !important;
+    -webkit-overflow-scrolling:touch !important;
+}
+#dashboard:not(.brightlife-public-mode) .settings-table{
+    min-width:720px;
+}
+#dashboard:not(.brightlife-public-mode) #nav-dataimport.active{
+    background:linear-gradient(135deg,#6c3ce1,#5b32c7) !important;
+    color:#fff !important;
+    box-shadow:0 8px 18px rgba(108,60,225,.20) !important;
+}
+
+/* Reports: actions remain visible and readable without breaking the shell. */
+#dashboard:not(.brightlife-public-mode) .report-actions{
+    display:flex !important;
+    flex-wrap:wrap !important;
+    gap:8px !important;
+    align-items:center !important;
+}
+#dashboard:not(.brightlife-public-mode) .report-actions button{
+    min-height:40px !important;
+}
+
+/* Customer-care inbox list and reply dialog. */
+#dashboard:not(.brightlife-public-mode) #adminChatContainer{
+    max-height:none !important;
+    min-height:220px !important;
+    overflow:visible !important;
+}
+#dashboard:not(.brightlife-public-mode) .chat-container{
+    overflow:visible !important;
+}
+.chat-reply-modal .chat-message-row{
+    margin-bottom:12px !important;
+}
+.chat-reply-modal .reply-action{
+    margin-top:10px !important;
+}
+</style>
+
 </head>
 <body>
     <div id="brightlifeBootLoader" style="display:none;position:fixed;inset:0;z-index:99999;background:var(--gray-50,#f8fafc);align-items:center;justify-content:center;padding:24px;">
@@ -2870,7 +3044,7 @@ window.BRIGHTLIFE_BUILD = 'BRIGHTLIFE-WORKSPACE-PROFESSIONAL-2026-09-24';
 
 function navigateTo(page) {
             document.body.classList.remove('snd-auth-active');
-            const securePages = ['dashboard','savings','loans','loanmanagement','guarantors','repayments','transactions','reports','profile','messages','settings','contentmanagement','adminsettings','admin','members','alltransactions','executive','chat','rights'];
+            const securePages = ['dashboard','savings','loans','loanmanagement','guarantors','repayments','transactions','reports','profile','messages','settings','contentmanagement','adminsettings','admin','members','alltransactions','dataimport','executive','chat','rights'];
             if (securePages.indexOf(page) !== -1 && !getCanonicalMemberId()) {
                 openMemberLogin();
                 return;
@@ -3594,7 +3768,7 @@ function updateUserInfo(member) {
                     } catch (e) {}
                     updateUserInfo(result.member);
                     showAuthenticatedShell(result.member);
-                    loadDashboard(true).catch(function(e){ console.error('Dashboard load after login:',e); });
+                    loadDashboard(false).catch(function(e){ console.error('Dashboard load after login:',e); });
                     setTimeout(function(){
                         callServer('synchronizeMemberAccountAge',{memberId:result.member.idNumber,actorId:result.member.id},{force:true}).catch(function(){});
                     },50);
@@ -4374,28 +4548,35 @@ if(app) app.style.display='none'; if(dashboard) dashboard.style.display='none'; 
 
                 html += '</div>';
                 document.getElementById('dashboardContent').innerHTML = html;
-                if (role === 'super_admin' || role === 'admin' || role === 'treasurer' || role === 'profile_approver' || role === 'customer_care' || permissions.view_members || permissions.savings_approval ||
-                    permissions.loan_approval || permissions.profile_approval || permissions.withdrawal_approval || permissions.registration_approval) {
+
+                /* Non-critical badge requests run after the dashboard is visible.
+                   This removes two serial network waits from the critical render path. */
+                setTimeout(async function(){
+                    if (role === 'super_admin' || role === 'admin' || role === 'treasurer' || role === 'profile_approver' || role === 'customer_care' || permissions.view_members || permissions.savings_approval ||
+                        permissions.loan_approval || permissions.profile_approval || permissions.withdrawal_approval || permissions.registration_approval) {
+                        try {
+                            const adminStats = await callServer('getDashboardStats', {memberId: getCanonicalMemberId()}, {force:false});
+                            if (adminStats && adminStats.success !== false) {
+                                const totalPending = Number(adminStats.pendingRegistrations || 0) + Number(adminStats.pendingTransactions || 0) + Number(adminStats.pendingLoans || 0) + Number(adminStats.pendingWithdrawals || 0) + Number(adminStats.pendingProfileEdits || 0);
+                                const pendingBadgeEl = document.getElementById('pendingBadge');
+                                if (pendingBadgeEl) pendingBadgeEl.textContent = totalPending;
+                                const approvalBadge = document.getElementById('approvalBadge');
+                                if (approvalBadge) approvalBadge.textContent = totalPending;
+                                pendingCount = totalPending;
+                            }
+                        } catch (e) {}
+                    }
                     try {
-                        const adminStats = await callServer('getDashboardStats', {memberId: getCanonicalMemberId()}, {force:false});
-                        if (adminStats && adminStats.success !== false) {
-                            const totalPending = Number(adminStats.pendingRegistrations || 0) + Number(adminStats.pendingTransactions || 0) + Number(adminStats.pendingLoans || 0) + Number(adminStats.pendingWithdrawals || 0) + Number(adminStats.pendingProfileEdits || 0);
-                            document.getElementById('pendingBadge').textContent = totalPending;
-                            const approvalBadge = document.getElementById('approvalBadge');
-                            if (approvalBadge) approvalBadge.textContent = totalPending;
-                            pendingCount = totalPending;
+                        const msgResult = await callServer('getUnreadMessages', { memberId: memberId });
+                        if (msgResult && msgResult.success) {
+                            const count = msgResult.count || 0;
+                            const badge = document.getElementById('messageBadge');
+                            if (badge) badge.textContent = count;
+                            setElementDisplaySafe('messageBadge', count > 0 ? 'inline' : 'none');
+                            messageCount = count;
                         }
                     } catch (e) {}
-                }
-                try {
-                    const msgResult = await callServer('getUnreadMessages', { memberId: memberId });
-                    if (msgResult.success) {
-                        const count = msgResult.count || 0;
-                        document.getElementById('messageBadge').textContent = count;
-                        setElementDisplaySafe('messageBadge', count > 0 ? 'inline' : 'none');
-                        messageCount = count;
-                    }
-                } catch (e) {}
+                }, 0);
 
             } catch (error) {
                 console.error('Dashboard error:', error);
@@ -8054,7 +8235,7 @@ if(app) app.style.display='none'; if(dashboard) dashboard.style.display='none'; 
                 const permissions=JSON.parse(sessionStorage.getItem('permissions')||'{}');
                 const isAdmin=['super_admin','admin','treasurer'].includes(role)||permissions.view_reports===true;
                 if(!isAdmin){
-                    const r=await callServer('getMemberProfile',{memberId},{force:true});
+                    const r=await callServer('getMemberProfile',{memberId,actorId:memberId,sessionToken:sessionStorage.getItem('brightlifeSessionToken')||''},{force:true});
                     if(!r.success)throw new Error(r.message||'Could not load member report');
                     const p=r.profile||{}, loans=r.loans||[], tx=r.transactions||[], reps=r.repayments||[];
                     const totalSavings=tx.filter(t=>t.type==='savings'&&t.status==='completed').reduce((a,t)=>a+Number(t.amount||0),0);
@@ -8069,7 +8250,7 @@ if(app) app.style.display='none'; if(dashboard) dashboard.style.display='none'; 
                     html+=`</div>`; body.innerHTML=html; return;
                 }
                 const reportFrom=sessionStorage.getItem('reportFrom')||''; const reportTo=sessionStorage.getItem('reportTo')||'';
-                const result=await callServer('getManagementReportData',{memberId,fromDate:reportFrom,toDate:reportTo},{force:true});
+                const result=await callServer('getManagementReportData',{memberId,actorId:memberId,sessionToken:sessionStorage.getItem('brightlifeSessionToken')||'',fromDate:reportFrom,toDate:reportTo},{force:true});
                 if(!result.success)throw new Error(result.message||'Unable to load management reports');
                 const s=result.summary||{}, members=result.members||[], loans=result.loans||[], reps=result.repayments||[], tx=result.transactions||[], withdrawals=result.withdrawals||[], g=result.guarantors||[], audit=result.audit||[], months=result.months||[], aging=result.aging||{};
                 const money=v=>'KES '+Number(v||0).toLocaleString('en-KE',{minimumFractionDigits:0,maximumFractionDigits:0});
@@ -8120,7 +8301,7 @@ html+=`<div class="section-card" id="reportFilters"><div class="section-title"><
             const memberId = getCanonicalMemberId(); if(!memberId)return;
             try {
                 showToast('Preparing professional PDF report…','info');
-                const result=await callServer('generateReportPdf',{memberId:memberId,targetMemberId:targetMemberId||null,reportType:type});
+                const result=await callServer('generateReportPdf',{memberId:memberId,actorId:memberId,sessionToken:sessionStorage.getItem('brightlifeSessionToken')||'',targetMemberId:targetMemberId||null,reportType:type},{force:true});
                 if(!result.success) throw new Error(result.message||'Report generation failed');
                 const bytes=Uint8Array.from(atob(result.base64),c=>c.charCodeAt(0));
                 const blob=new Blob([bytes],{type:'application/pdf'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=result.filename; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),1000); showToast('PDF report generated.','success');
