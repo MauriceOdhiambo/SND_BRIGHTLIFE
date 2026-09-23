@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <link rel="canonical" href="https://brightlifesnd.com/" />
     <meta name="description" content="SND Brightlife CBO empowers people, creates opportunities and builds brighter communities through financial empowerment, clean water, agriculture, education, skills development, entrepreneurship and community-led programmes in Kenya." />
-    <meta name="keywords" content="SND Brightlife CBO, sindo bright life, sindo brightlife, brightlife sindo, Brightlife CBO, community based organization Kenya, financial empowerment, table banking, clean water, agriculture, poultry, skills development, education, entrepreneurship, community development" />
+    <meta name="keywords" content="SND Brightlife CBO, Brightlife CBO, community based organization Kenya, financial empowerment, table banking, clean water, agriculture, poultry, skills development, education, entrepreneurship, community development" />
     <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
     <meta name="author" content="SND Brightlife CBO" />
     <meta property="og:type" content="website" />
@@ -2329,6 +2329,15 @@ body.snd-auth-active #mainWrapper > #app.registration-mode {
  .member-project-post h3{font-size:20px}
 }
 </style>
+<style id="snd-member-project-content-cleanup">
+/* Secure member project pages contain published content only. The member topbar is the page header. */
+.member-project-workspace{max-width:1180px !important;margin:0 auto !important;padding:28px 32px 56px !important;}
+.member-project-workspace .member-project-header{display:none !important;}
+.member-project-workspace #memberProjectUpdateBody{width:100% !important;}
+.member-project-workspace .member-project-post{margin:0 !important;}
+@media(max-width:900px){.member-project-workspace{padding:20px 18px 42px !important;}}
+@media(max-width:560px){.member-project-workspace{padding:16px 12px 32px !important;}}
+</style>
 </head>
 <body>
     <div id="brightlifeBootLoader" style="display:none;position:fixed;inset:0;z-index:99999;background:var(--gray-50,#f8fafc);align-items:center;justify-content:center;padding:24px;">
@@ -3739,7 +3748,7 @@ function loadPublicHomePage(){
                         <div class="bl-inner-head">
                             <button type="button" class="bl-brand" onclick="closeBrightlifeInnerMenu();showPublicHome()" aria-label="SND Brightlife CBO Home">
                                 <img src="https://i.ibb.co/Tx5GPpmN/Whats-App-Image-2026-09-04-at-09-51-28.jpg" alt="SND Brightlife CBO" decoding="async">
-                                <span><strong>SND Brightlife CBO</strong><small>Community-led solutions for sustainable development</small></span>
+                                <span><strong>SND Brightlife CBO</strong><small>Empowering People. Building Livelihoods. Transforming Communities.</small></span>
                             </button>
                             <button type="button" class="bl-inner-menu-toggle" aria-label="Open website menu" aria-expanded="false" onclick="toggleBrightlifeInnerMenu(event)"><i class="fas fa-bars"></i><span>Menu</span></button>
                             <nav aria-label="Website navigation">
@@ -3924,7 +3933,7 @@ if(!document.getElementById('brightlifeProjectsPublicHeaderStyles')){var st=docu
             var activeNav=document.getElementById(key==='water'?'nav-project-water-secure':key==='poultry'?'nav-project-poultry-secure':key==='training'?'nav-trainings-secure':key==='other'?'nav-project-other-secure':null);
             if(activeNav) activeNav.classList.add('active');
 
-            content.innerHTML='<div class="dashboard-body member-project-workspace"><div class="member-project-header"><div><div class="site-kicker">COMMUNITY PROJECT</div><h2>'+escapeHtml(title)+'</h2><p>Only information that has been published by the authorized administration is displayed here.</p></div><button type="button" class="btn-outline" onclick="navigateTo(\'dashboard\')"><i class="fas fa-arrow-left"></i> Back to Dashboard</button></div><div id="memberProjectUpdateBody"><div class="section-card"><div style="padding:45px;text-align:center;color:var(--gray-500)"><i class="fas fa-spinner fa-spin" style="font-size:24px;color:var(--primary)"></i><div style="margin-top:10px;font-weight:800">Loading published update…</div></div></div></div></div>';
+            content.innerHTML='<div class="dashboard-body member-project-workspace"><div id="memberProjectUpdateBody"><div class="section-card"><div style="padding:45px;text-align:center;color:var(--gray-500)"><i class="fas fa-spinner fa-spin" style="font-size:24px;color:var(--primary)"></i><div style="margin-top:10px;font-weight:800">Loading published update…</div></div></div></div></div>';
 
             try{
                 var map=await getPublicContentMap([key]);
