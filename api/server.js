@@ -6057,6 +6057,10 @@ function buildProfessionalPdf_(sections, meta){
     c.push('BT /F2 15 Tf 1 1 1 rg 86 780 Td ('+pdfEscapeText_(meta.organization||'SND BRIGHTLIFE CBO')+') Tj ET');
     c.push('BT /F2 9 Tf 0.78 0.84 0.90 rg 86 751 Td (Professional Management Reporting) Tj ET');
     c.push('BT /F1 8 Tf 0.78 0.84 0.90 rg 86 765 Td (Savings & Loans Management Report) Tj ET');
+    if(meta.memberCode || meta.memberName){
+      const memberLabel=((meta.memberCode||'—')+' • '+(meta.memberName||'Member')).slice(0,70);
+      c.push('BT /F2 8 Tf 1 1 1 rg 86 736 Td ('+pdfEscapeText_(memberLabel)+') Tj ET');
+    }
     c.push('BT /F1 7 Tf 0.45 0.50 0.56 rg 44 34 Td (Confidential • Generated '+pdfEscapeText_(meta.generated||'')+') Tj ET');
     c.push('BT /F1 7 Tf 0.45 0.50 0.56 rg 495 34 Td ('+pageNo+' / '+meta.pageCount+') Tj ET');
     return c;
@@ -6088,6 +6092,19 @@ function buildProfessionalPdf_(sections, meta){
     if(row.type==='section'){
       ensure(34); current.push('q'); current.push(pdfColor_(246,243,255)+' rg'); current.push(`${LEFT-4} ${y-22} ${RIGHT-LEFT+8} 26 re f`); current.push('Q');
       textRow(row.text.toUpperCase(),10,true,pdfColor_(83,42,153),8,14); y-=4; return;
+    }
+    if(row.type==='identity'){
+      const items=row.items||[];
+      const gap=8, w=(RIGHT-LEFT-gap*Math.max(0,items.length-1))/Math.max(items.length,1);
+      ensure(66);
+      items.forEach(function(item,i){
+        const x=LEFT+i*(w+gap);
+        current.push('q'); current.push(pdfColor_(248,250,252)+' rg'); current.push(`${x} ${y-54} ${w} 56 re f`); current.push('Q');
+        current.push(`q ${pdfColor_(108,60,225)} rg ${x} ${y-54} 3 56 re f Q`);
+        current.push(`BT /F1 7 Tf 0.35 0.40 0.48 rg ${x+9} ${y-17} Td (${pdfEscapeText_(String(item.label||''))}) Tj ET`);
+        current.push(`BT /F2 9 Tf 0.08 0.10 0.14 rg ${x+9} ${y-38} Td (${pdfEscapeText_(String(item.value||'—'))}) Tj ET`);
+      });
+      y-=68; return;
     }
     if(row.type==='kpis'){
       const values=row.values||[], gap=8, w=(RIGHT-LEFT-gap*(values.length-1))/values.length;
@@ -6142,12 +6159,12 @@ async function generateReportPdf(data){
       const savings=tx.filter(t=>t.type==='savings'&&t.status==='completed').reduce((a,t)=>a+numberValue(t.amount),0);
       const repayments=reps.reduce((a,t)=>a+numberValue(t.amount),0);
       const loaned=loans.reduce((a,t)=>a+numberValue(t.amount),0);
-      sections.push({title:'Member Statement',rows:[{type:'kpis',values:[{label:'Savings Balance',value:formatKes(m.savings_balance)},{label:'Total Savings',value:formatKes(savings)},{label:'Loans Taken',value:formatKes(loaned)},{label:'Repayments',value:formatKes(repayments)}]},{text:'Member: '+(m.full_name||'Member')+'  •  Member Code: '+(m.unique_member_id||'')+'  •  Account Status: '+(m.is_active?'Active':'Pending'),size:8,bold:true}]});
+      sections.push({title:'Account Overview',rows:[{type:'identity',items:[{label:'Member Name',value:m.full_name||'Member'},{label:'Member Number',value:m.unique_member_id||'—'},{label:'Account Status',value:m.is_active?'Active':'Pending'}]},{type:'kpis',values:[{label:'Savings Balance',value:formatKes(m.savings_balance)},{label:'Total Savings',value:formatKes(savings)},{label:'Loans Taken',value:formatKes(loaned)},{label:'Repayments',value:formatKes(repayments)}]},{text:'Statement generated from the authorized SND Brightlife CBO account records available at the time of generation.',size:7.5,color:'0.39 0.45 0.52'}]});
       sections.push({title:'Loan History',rows:[{type:'table',columns:['Application','Amount','Status','Total Due'],data:loans.slice(0,120).map(l=>[formatKenyaDate_(new Date(l.application_date||l.created_at)),formatKes(l.amount),l.status||'',formatKes(l.total_repayment)])}]});
       sections.push({title:'Recent Transactions',rows:[{type:'table',columns:['Date','Type','Amount','Status','M-Pesa'],data:tx.slice(0,150).map(t=>[formatKenyaDate_(new Date(t.created_at)),t.type||'',formatKes(t.amount),t.status||'',t.mpesa_code||''])}]});
       sections.push({title:'Repayment Log',rows:[{type:'table',columns:['Date','Amount','Method','M-Pesa'],data:reps.slice(0,120).map(r=>[formatKenyaDate_(new Date(r.payment_date||r.created_at)),formatKes(r.amount),r.payment_method||'M-Pesa',r.mpesa_code||''])}]});
     }
-    const base64=buildProfessionalPdf_(sections,{organization:'SND BRIGHTLIFE CBO',generated:generated,pageCount:0});
+    const base64=buildProfessionalPdf_(sections,{organization:'SND BRIGHTLIFE CBO',generated:generated,reportTitle:report.organization?'MANAGEMENT REPORT':'MEMBER STATEMENT',memberCode:report.organization?'':(report.member?.unique_member_id||''),memberName:report.organization?'':(report.member?.full_name||''),pageCount:0});
     const id=report.organization?'organization':(report.member?.unique_member_id||'member');
     const reportType=String(data&&data.reportType||'summary').replace(/[^a-z0-9_-]/gi,'')||'summary';
     return {success:true,filename:`Brightlife_${id}_${reportType}_${formatDate_(new Date(),'Africa/Nairobi','yyyyMMdd_HHmm')}.pdf`,mimeType:'application/pdf',base64:base64,pages:'professional'};
