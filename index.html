@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <link rel="canonical" href="https://brightlifesnd.com/" />
     <meta name="description" content="SND Brightlife CBO empowers people, creates opportunities and builds brighter communities through financial empowerment, clean water, agriculture, education, skills development, entrepreneurship and community-led programmes in Kenya." />
-    <meta name="keywords" content="SND Brightlife CBO, best table banking, Brightlife CBO, community based organization Kenya, financial empowerment, table banking, clean water, agriculture, poultry, skills development, education, entrepreneurship, community development, brightlifesnd, snd brightlife, snd brightlife, sindo brightlife" />
+    <meta name="keywords" content="SND Brightlife CBO, Sindo brightlife, Bright life, Best saving, best loans, best table banking Brightlife CBO, community based organization Kenya, financial empowerment, table banking, clean water, agriculture, poultry, skills development, education, entrepreneurship, community development" />
     <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
     <meta name="author" content="SND Brightlife CBO" />
     <meta property="og:type" content="website" />
@@ -1743,8 +1743,9 @@ html{scroll-behavior:smooth}body{overflow-x:hidden}.home-summary-hero{min-height
 @media(max-width:430px){.summary-focus-grid{grid-template-columns:1fr}.summary-focus-card{min-height:auto}.brightlife-hero-actions{flex-direction:column}.brightlife-hero-actions .public-action{width:100%}.summary-about-actions .public-action{width:100%}}/* Keep page background clean and content readable */
 .brightlife-public-page,.public-projects-landing{background:#f7f9fc!important}.brightlife-public-page .home-section:nth-of-type(even){background:#fff}
 </style>
-<style id="snd-public-account-visibility-guard">/* Authenticated account controls are hidden by default and explicitly restored only for secure member pages. */
-#dashboard .member-topbar{display:none}
+<style id="snd-public-account-visibility-guard">/* Public pages hide the secure member topbar; authenticated pages restore it. */
+#dashboard.brightlife-public-mode .member-topbar{display:none !important;}
+#dashboard:not(.brightlife-public-mode) .member-topbar{display:flex;}
 </style>
 <style id="snd-brightlife-public-shell">
 /* Public dashboard shell: the public site occupies the full viewport without the member sidebar. */
@@ -2186,6 +2187,112 @@ body.snd-auth-active #mainWrapper > #app.registration-mode {
 
     body.snd-auth-active #mainWrapper > #app:not(.registration-mode) .login-welcome p {
         font-size:11px !important;
+    }
+}
+</style>
+
+
+<style id="snd-secure-member-shell-final">
+/* =========================================================
+   FINAL AUTHENTICATED MEMBER SHELL
+   Public-mode hiding must never hide the secure member UI.
+   ========================================================= */
+
+#dashboard:not(.brightlife-public-mode) .member-topbar{
+    display:flex !important;
+    visibility:visible !important;
+    opacity:1 !important;
+    position:sticky !important;
+    top:0 !important;
+    z-index:100 !important;
+}
+
+#dashboard:not(.brightlife-public-mode) .account-wrap{
+    position:relative !important;
+    display:block !important;
+}
+
+#dashboard:not(.brightlife-public-mode) .account-trigger{
+    display:flex !important;
+    align-items:center !important;
+    gap:10px !important;
+    min-height:44px !important;
+    cursor:pointer !important;
+}
+
+#dashboard:not(.brightlife-public-mode) .account-menu{
+    position:absolute !important;
+    top:calc(100% + 10px) !important;
+    right:0 !important;
+    z-index:1000 !important;
+    min-width:220px !important;
+    background:#fff !important;
+    border:1px solid #e2e8f0 !important;
+    border-radius:14px !important;
+    box-shadow:0 18px 45px rgba(15,23,42,.18) !important;
+    padding:8px !important;
+}
+
+#dashboard:not(.brightlife-public-mode) .account-wrap:not(.open) .account-menu{
+    display:none !important;
+}
+
+#dashboard:not(.brightlife-public-mode) .account-wrap.open .account-menu{
+    display:block !important;
+}
+
+#dashboard:not(.brightlife-public-mode) .account-menu button{
+    display:flex !important;
+    width:100% !important;
+    align-items:center !important;
+    gap:10px !important;
+    padding:11px 12px !important;
+    border:0 !important;
+    border-radius:9px !important;
+    background:transparent !important;
+    color:#172033 !important;
+    text-align:left !important;
+    cursor:pointer !important;
+    font-weight:700 !important;
+}
+
+#dashboard:not(.brightlife-public-mode) .account-menu button:hover{
+    background:#f3f4f6 !important;
+}
+
+#dashboard:not(.brightlife-public-mode) .account-menu button.danger{
+    color:#b42318 !important;
+}
+
+#dashboard:not(.brightlife-public-mode) .account-menu-label{
+    padding:7px 12px 6px !important;
+    color:#64748b !important;
+    font-size:11px !important;
+    font-weight:800 !important;
+    text-transform:uppercase !important;
+    letter-spacing:.06em !important;
+}
+
+#dashboard:not(.brightlife-public-mode) #sidebar{
+    display:block !important;
+}
+
+#dashboard:not(.brightlife-public-mode) #secureMemberSection{
+    display:block !important;
+}
+
+@media(max-width:900px){
+    #dashboard:not(.brightlife-public-mode) .member-topbar{
+        position:sticky !important;
+    }
+
+    #dashboard:not(.brightlife-public-mode) .account-trigger-text{
+        display:none !important;
+    }
+
+    #dashboard:not(.brightlife-public-mode) .account-menu{
+        right:0 !important;
+        min-width:210px !important;
     }
 }
 </style>
@@ -3296,21 +3403,80 @@ function updateUserInfo(member) {
 
         function showAuthenticatedShell(member) {
             document.body.classList.remove('snd-auth-active');
-            var auth = document.getElementById('app'); if (auth) auth.style.display = 'none';
 
-            const app=document.getElementById('app'), dashboard=document.getElementById('dashboard'), content=document.getElementById('dashboardContent');
-            const memberTopbar=document.getElementById('memberTopbar');
-            if(app) app.style.display='none';
-            if(dashboard) dashboard.style.display='block';
-            if(memberTopbar) memberTopbar.style.display='flex';
-            if(content) content.innerHTML='<div class="dashboard-body"><div style="padding:32px;text-align:center"><div class="spinner" style="margin:0 auto 14px"></div><strong>Welcome, '+String((member&&member.name)||'Member').replace(/[<>&"']/g,'')+'</strong><div style="color:var(--gray-500);margin-top:6px">Loading your account…</div></div></div>';
-            var publicSidebar=document.getElementById('publicSidebarSection'); if(publicSidebar) publicSidebar.style.display='none';
-            var secureSection=document.getElementById('secureMemberSection'); if(secureSection) secureSection.style.display='block';
-            var adminSection=document.getElementById('adminSection');
-            var role=String((member&&member.role)||'').toLowerCase();
-            if(adminSection) adminSection.style.display=(role==='admin'||role==='super_admin'||role==='treasurer'||role==='customer_care'||role==='profile_approver')?'block':'none';
+            var auth = document.getElementById('app');
+            var dashboard = document.getElementById('dashboard');
+            var content = document.getElementById('dashboardContent');
+            var memberTopbar = document.getElementById('memberTopbar');
+            var sidebar = document.getElementById('sidebar');
+            var sidebarOverlay = document.getElementById('sidebarOverlay');
+            var mobileMenuToggle = document.getElementById('mobileMenuToggle');
+            var publicSidebar = document.getElementById('publicSidebarSection');
+            var secureSection = document.getElementById('secureMemberSection');
+            var adminSection = document.getElementById('adminSection');
+            var mainWrapper = document.getElementById('mainWrapper');
+
+            /* Leave all public-page presentation modes before entering the
+               authenticated member workspace. */
+            if (dashboard) {
+                dashboard.classList.remove('brightlife-public-mode');
+                dashboard.style.display = 'block';
+            }
+            if (mainWrapper && mainWrapper.classList) {
+                mainWrapper.classList.remove('public-site-mode');
+            }
+            if (auth) auth.style.display = 'none';
+
+            /* Restore the authenticated shell: sidebar + topbar + content. */
+            if (sidebar) {
+                sidebar.style.display = '';
+                sidebar.classList.remove('visible');
+                sidebar.setAttribute('aria-hidden', 'false');
+            }
+            if (sidebarOverlay) {
+                sidebarOverlay.style.display = 'none';
+                sidebarOverlay.setAttribute('aria-hidden', 'true');
+            }
+            if (mobileMenuToggle) {
+                mobileMenuToggle.classList.remove('hidden');
+                mobileMenuToggle.style.display = '';
+                mobileMenuToggle.setAttribute('aria-hidden', 'false');
+            }
+            if (publicSidebar) publicSidebar.style.display = 'none';
+            if (secureSection) secureSection.style.display = 'block';
+
+            if (memberTopbar) {
+                memberTopbar.style.display = 'flex';
+                memberTopbar.setAttribute('aria-hidden', 'false');
+            }
+
+            if (content) {
+                var safeName = String((member && (member.name || member.fullName)) || 'Member')
+                    .replace(/[<>&"']/g, '');
+                content.innerHTML =
+                    '<div class="dashboard-body">' +
+                        '<div style="padding:32px;text-align:center">' +
+                            '<div class="spinner" style="margin:0 auto 14px"></div>' +
+                            '<strong>Welcome, ' + safeName + '</strong>' +
+                            '<div style="color:var(--gray-500);margin-top:6px">Loading your account…</div>' +
+                        '</div>' +
+                    '</div>';
+            }
+
+            var role = String((member && member.role) || '').toLowerCase();
+            if (adminSection) {
+                adminSection.style.display =
+                    ['admin','super_admin','treasurer','customer_care','profile_approver'].includes(role)
+                    ? 'block'
+                    : 'none';
+            }
+
             updateUserInfo(member);
             updateMemberTopbar(member);
+            closeAccountMenu();
+
+            /* Make the secure member workspace the active application area. */
+            document.body.classList.add('member-session-active');
         }
         async function loginUser(event) {
             event.preventDefault();
@@ -3528,7 +3694,7 @@ function loadPublicHomePage(){
                         <div class="bl-inner-head">
                             <button type="button" class="bl-brand" onclick="closeBrightlifeInnerMenu();showPublicHome()" aria-label="SND Brightlife CBO Home">
                                 <img src="https://i.ibb.co/Tx5GPpmN/Whats-App-Image-2026-09-04-at-09-51-28.jpg" alt="SND Brightlife CBO" decoding="async">
-                                <span><strong>SND Brightlife CBO</strong><small>Community - Led Solutions for Sustainable Development.</small></span>
+                                <span><strong>SND Brightlife CBO</strong><small>Community-led solutions for sustainable development</small></span>
                             </button>
                             <button type="button" class="bl-inner-menu-toggle" aria-label="Open website menu" aria-expanded="false" onclick="toggleBrightlifeInnerMenu(event)"><i class="fas fa-bars"></i><span>Menu</span></button>
                             <nav aria-label="Website navigation">
@@ -3631,7 +3797,7 @@ if(!document.getElementById('brightlifeProjectsPublicHeaderStyles')){var st=docu
             body.innerHTML=`<div class="brightlife-public-page public-projects-landing" id="brightlife-projects-public-page">
                 <header class="bl-inner-header">
                     <div class="bl-inner-head">
-                        <button type="button" class="bl-brand" onclick="closeBrightlifeInnerMenu();showPublicHome()" aria-label="SND Brightlife CBO Home"><img src="https://i.ibb.co/Tx5GPpmN/Whats-App-Image-2026-09-04-at-09-51-28.jpg" alt="SND Brightlife CBO"><span><strong>SND Brightlife CBO</strong><small>Empowering People. Building Livelihoods. Transforming Communities.</small></span></button>
+                        <button type="button" class="bl-brand" onclick="closeBrightlifeInnerMenu();showPublicHome()" aria-label="SND Brightlife CBO Home"><img src="https://i.ibb.co/Tx5GPpmN/Whats-App-Image-2026-09-04-at-09-51-28.jpg" alt="SND Brightlife CBO"><span><strong>SND Brightlife CBO</strong><small>Community-led solutions for sustainable development</small></span></button>
                         <button type="button" class="bl-inner-menu-toggle" aria-label="Open website menu" aria-expanded="false" onclick="toggleBrightlifeInnerMenu(event)"><i class="fas fa-bars"></i><span>Menu</span></button>
                         <nav aria-label="Website navigation">
                             <button type="button" onclick="closeBrightlifeInnerMenu();showPublicHome()">Home</button>
