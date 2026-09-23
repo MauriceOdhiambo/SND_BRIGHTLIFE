@@ -2338,6 +2338,19 @@ body.snd-auth-active #mainWrapper > #app.registration-mode {
 @media(max-width:900px){.member-project-workspace{padding:20px 18px 42px !important;}}
 @media(max-width:560px){.member-project-workspace{padding:16px 12px 32px !important;}}
 </style>
+<style id="snd-secure-project-content-only">
+/* Secure member projects show published content only; never show the public project hero. */
+body.member-session-active #publicProjectPage .sp-header,
+body.member-session-active #publicProjectPage .sp-kicker,
+body.member-session-active #publicProjectPage .sp-inner,
+body.member-session-active .brightlife-selected-project > .sp-header {
+    display:none !important;
+}
+body.member-session-active #publicProjectPage .brightlife-selected-project {
+    background:transparent !important;
+    min-height:0 !important;
+}
+</style>
 </head>
 <body>
     <div id="brightlifeBootLoader" style="display:none;position:fixed;inset:0;z-index:99999;background:var(--gray-50,#f8fafc);align-items:center;justify-content:center;padding:24px;">
@@ -3960,11 +3973,20 @@ if(!document.getElementById('brightlifeProjectsPublicHeaderStyles')){var st=docu
         }
 
         async function showSelectedProjectUpdatesPage(title,key){
-            if(getCanonicalMemberId()) return showMemberProjectUpdatesPage(title,key);
-            var projectPage=document.getElementById('publicProjectPage'), app=document.getElementById('app'), dashboard=document.getElementById('dashboard'), mainWrapper=document.getElementById('mainWrapper'), sidebar=document.getElementById('sidebar');
+            /*
+             * Secure workspace rule:
+             * If the member workspace is active, project links must ALWAYS render
+             * only the published project content inside #dashboardContent.
+             * Never open the standalone public project page from the secure area.
+             */
+            var secureDashboard=document.getElementById('dashboard');
+            var secureWorkspaceActive=!!(secureDashboard && secureDashboard.style.display !== 'none' && (document.body.classList.contains('member-session-active') || document.getElementById('secureMemberSection')));
+            if(getCanonicalMemberId() || secureWorkspaceActive){
+                return showMemberProjectUpdatesPage(title,key);
+            }
+
+            var projectPage=document.getElementById('publicProjectPage'), app=document.getElementById('app'), dashboard=secureDashboard, mainWrapper=document.getElementById('mainWrapper'), sidebar=document.getElementById('sidebar');
 if(app) app.style.display='none'; if(dashboard) dashboard.style.display='none'; if(projectPage) projectPage.style.display='block';
-            // Keep the existing member sidebar interactive while project content is open.
-            if(sidebar && getCanonicalMemberId()){ sidebar.classList.add('visible'); sidebar.style.zIndex='20001'; }
             if(mainWrapper && mainWrapper.classList){
                 mainWrapper.classList.add('public-site-mode');
                 mainWrapper.classList.remove('public-projects-mode');
