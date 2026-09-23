@@ -2525,6 +2525,91 @@ body.member-session-active #publicProjectPage .brightlife-selected-project {
 }
 </style>
 
+
+<style id="snd-professional-reports">
+/* =========================================================
+   SND BRIGHTLIFE — PROFESSIONAL REPORTING CENTRE
+   ========================================================= */
+#dashboard:not(.brightlife-public-mode) .report-shell{
+  width:100%;max-width:1500px;margin:0 auto;padding:24px 26px 50px;box-sizing:border-box;
+}
+#dashboard:not(.brightlife-public-mode) .report-hero{
+  position:relative;overflow:hidden;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:24px;align-items:center;
+  padding:28px 30px;border-radius:22px;background:linear-gradient(135deg,#081b32 0%,#0c3151 58%,#17486d 100%);
+  color:#fff;box-shadow:0 18px 42px rgba(8,27,50,.18);margin-bottom:18px;
+}
+#dashboard:not(.brightlife-public-mode) .report-hero:after{
+  content:"";position:absolute;width:300px;height:300px;border-radius:50%;right:-130px;top:-180px;background:rgba(124,58,237,.18);
+}
+.report-brand{display:flex;align-items:center;gap:15px;position:relative;z-index:1}
+.report-brand img{width:62px;height:62px;object-fit:cover;border-radius:16px;background:#fff;padding:4px;box-shadow:0 10px 25px rgba(0,0,0,.18)}
+.report-brand-kicker{font-size:10px;letter-spacing:.16em;text-transform:uppercase;font-weight:900;color:#b9cfff;margin-bottom:4px}
+.report-brand-title{font-size:28px;font-weight:900;line-height:1.1}
+.report-brand-sub{font-size:12px;color:#cbd8e6;margin-top:5px}
+.report-meta-card{position:relative;z-index:1;min-width:220px;padding:15px 17px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.08);border-radius:16px;backdrop-filter:blur(10px)}
+.report-meta-label{font-size:9px;text-transform:uppercase;letter-spacing:.12em;color:#b9cfff;font-weight:900}
+.report-meta-value{font-size:16px;font-weight:800;margin-top:4px}
+.report-meta-small{font-size:11px;color:#d8e2ee;margin-top:3px}
+.report-toolbar{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;padding:14px 16px;background:#fff;border:1px solid #e4eaf0;border-radius:16px;box-shadow:0 7px 22px rgba(15,23,42,.05);margin-bottom:18px}
+.report-toolbar-left,.report-toolbar-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.report-filter-label{font-size:11px;font-weight:800;color:#475467}
+.report-filter-input{height:38px!important;border:1px solid #d7e0e8!important;border-radius:10px!important;padding:0 10px!important;background:#f9fbfd!important;font-size:12px!important}
+.report-directory{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px}
+.report-directory .report-link-card{display:flex;align-items:center;gap:10px;text-align:left;padding:13px 14px;border:1px solid #e2e8f0;border-radius:13px;background:#fff;color:#172033;cursor:pointer;transition:.18s ease;min-height:62px}
+.report-directory .report-link-card:hover{transform:translateY(-1px);border-color:#bca7ff;box-shadow:0 8px 20px rgba(108,60,225,.10);background:#fbfaff}
+.report-link-card i{width:34px;height:34px;display:grid;place-items:center;border-radius:10px;background:#f0eaff;color:#6336d8;flex:0 0 34px}
+.report-link-title{font-size:12px;font-weight:900;line-height:1.25}
+.report-link-desc{font-size:10px;color:#667085;margin-top:2px}
+#dashboard:not(.brightlife-public-mode) .report-shell .section-card{
+  border:1px solid #e3e8ef!important;border-radius:18px!important;background:#fff!important;box-shadow:0 8px 24px rgba(15,23,42,.045)!important;margin-bottom:16px!important;overflow:hidden;
+}
+#dashboard:not(.brightlife-public-mode) .report-shell .section-title{
+  padding:16px 18px!important;margin:0!important;border-bottom:1px solid #edf0f4!important;background:linear-gradient(180deg,#fff,#fbfcfe)!important;font-size:14px!important;font-weight:900!important;color:#172033!important;
+}
+#dashboard:not(.brightlife-public-mode) .report-shell .section-title i{color:#6c3ce1;margin-right:8px}
+#dashboard:not(.brightlife-public-mode) .report-shell .metric-grid{padding:16px!important;gap:12px!important}
+#dashboard:not(.brightlife-public-mode) .report-shell .metric-surface{background:linear-gradient(180deg,#fff,#f8fafc)!important;border:1px solid #e5eaf0!important;border-radius:14px!important;min-height:90px;box-shadow:none!important}
+#dashboard:not(.brightlife-public-mode) .report-shell .metric-value{font-size:21px!important;color:#101828!important}
+#dashboard:not(.brightlife-public-mode) .report-shell .settings-table-wrap{padding:0 16px 16px!important}
+#dashboard:not(.brightlife-public-mode) .report-shell .settings-table{background:#fff!important;border-collapse:separate!important;border-spacing:0!important;width:100%!important;min-width:760px!important}
+#dashboard:not(.brightlife-public-mode) .report-shell .settings-table th{background:#f6f8fb!important;color:#475467!important;font-size:10px!important;text-transform:uppercase!important;letter-spacing:.04em!important;white-space:nowrap!important;border-bottom:1px solid #e5e7eb!important}
+#dashboard:not(.brightlife-public-mode) .report-shell .settings-table td{font-size:11px!important;color:#344054!important;border-bottom:1px solid #eef1f4!important;vertical-align:middle!important}
+#dashboard:not(.brightlife-public-mode) .report-shell .settings-table tbody tr:hover{background:#fbfaff!important}
+#dashboard:not(.brightlife-public-mode) .report-shell .report-actions{padding:16px!important}
+#dashboard:not(.brightlife-public-mode) .report-shell .report-actions button{border-radius:10px!important;min-height:40px!important;font-weight:800!important}
+.report-status-line{display:flex;align-items:center;gap:7px;font-size:11px;color:#667085;padding:0 16px 14px}
+.report-status-line .dot{width:8px;height:8px;border-radius:50%;background:#12b76a;box-shadow:0 0 0 4px rgba(18,183,106,.10)}
+.report-empty{padding:30px;text-align:center;color:#667085}
+.report-empty i{font-size:30px;color:#98a2b3;margin-bottom:10px}
+@media(max-width:800px){
+  #dashboard:not(.brightlife-public-mode) .report-shell{padding:15px 12px 35px}
+  #dashboard:not(.brightlife-public-mode) .report-hero{grid-template-columns:1fr;padding:21px}
+  .report-meta-card{min-width:0;width:100%;box-sizing:border-box}
+  .report-brand-title{font-size:23px}
+  .report-brand img{width:52px;height:52px}
+  .report-toolbar{align-items:stretch}
+  .report-toolbar-left,.report-toolbar-actions{width:100%}
+  .report-toolbar-actions button{flex:1}
+}
+@media(max-width:520px){
+  .report-directory{grid-template-columns:1fr}
+  .report-brand{align-items:flex-start}
+  .report-brand-title{font-size:20px}
+}
+@media print{
+  body{background:#fff!important}
+  #dashboard:not(.brightlife-public-mode) .sidebar,
+  #dashboard:not(.brightlife-public-mode) .member-topbar,
+  #dashboard:not(.brightlife-public-mode) .mobile-sidebar-toggle,
+  #dashboard:not(.brightlife-public-mode) .report-toolbar-actions,
+  #dashboard:not(.brightlife-public-mode) #reportDirectory,
+  #dashboard:not(.brightlife-public-mode) .report-actions{display:none!important}
+  #dashboard:not(.brightlife-public-mode) .report-shell{max-width:none;padding:0}
+  #dashboard:not(.brightlife-public-mode) .report-hero{box-shadow:none;break-inside:avoid}
+  #dashboard:not(.brightlife-public-mode) .section-card{box-shadow:none!important;break-inside:auto}
+}
+</style>
+
 </head>
 <body>
     <div id="brightlifeBootLoader" style="display:none;position:fixed;inset:0;z-index:99999;background:var(--gray-50,#f8fafc);align-items:center;justify-content:center;padding:24px;">
@@ -8229,7 +8314,7 @@ if(app) app.style.display='none'; if(dashboard) dashboard.style.display='none'; 
         async function loadReportsPage() {
             const memberId=getCanonicalMemberId(); if(!memberId)return;
             const body=document.getElementById('dashboardContent');
-            body.innerHTML='<div class="dashboard-body"><div class="loading-state"><i class="fas fa-spinner fa-spin"></i><p>Loading reporting centre...</p></div></div>';
+            body.innerHTML='<div class="dashboard-body report-shell"><div class="loading-state"><i class="fas fa-spinner fa-spin"></i><p>Loading reporting centre...</p></div></div>';
             try {
                 const role=sessionStorage.getItem('memberRole')||'member';
                 const permissions=JSON.parse(sessionStorage.getItem('permissions')||'{}');
@@ -8241,7 +8326,7 @@ if(app) app.style.display='none'; if(dashboard) dashboard.style.display='none'; 
                     const totalSavings=tx.filter(t=>t.type==='savings'&&t.status==='completed').reduce((a,t)=>a+Number(t.amount||0),0);
                     const totalPaid=reps.reduce((a,t)=>a+Number(t.amount||0),0);
                     const outstanding=loans.filter(l=>l.status==='active').reduce((a,l)=>a+Math.max(0,Number(l.total_repayment||0)-Number(l.amount_paid||0)),0);
-                    let html=`<div class="dashboard-body"><div class="welcome-hero"><div><div class="welcome-kicker">Reporting Centre</div><div class="welcome-title">My Reports & Statements</div><div class="welcome-sub">Savings, contributions, loans, repayments and account activity.</div></div></div>`;
+                    let html=`<div class="dashboard-body report-shell"><div class="report-hero"><div class="report-brand"><img src="https://i.ibb.co/Tx5GPpmN/Whats-App-Image-2026-09-04-at-09-51-28.jpg" alt="SND Brightlife CBO logo"><div><div class="report-brand-kicker">SND Brightlife CBO</div><div class="report-brand-title">My Reports & Statements</div><div class="report-brand-sub">Personal savings, loans, repayments and account activity</div></div></div><div class="report-meta-card"><div class="report-meta-label">Account report</div><div class="report-meta-value">${p.unique_member_id||'Member'}</div><div class="report-meta-small">Generated ${new Date().toLocaleDateString('en-KE')}</div></div></div>`;
                     html+=`<div class="section-card"><div class="section-title"><i class="fas fa-chart-pie"></i> Financial Snapshot</div><div class="metric-grid"><div class="metric-surface"><div class="metric-label">Savings Balance</div><div class="metric-value">KES ${Number(p.savings_balance||0).toLocaleString()}</div></div><div class="metric-surface"><div class="metric-label">Total Contributions</div><div class="metric-value">KES ${totalSavings.toLocaleString()}</div></div><div class="metric-surface"><div class="metric-label">Loan Repayments</div><div class="metric-value">KES ${totalPaid.toLocaleString()}</div></div><div class="metric-surface"><div class="metric-label">Outstanding Loan</div><div class="metric-value">KES ${outstanding.toLocaleString()}</div></div></div></div>`;
                     html+=`<div class="section-card"><div class="section-title"><i class="fas fa-download"></i> Export Centre</div><div class="report-actions"><button class="btn-sm btn-primary" onclick="downloadReportPdf('summary','')"><i class="fas fa-file-pdf"></i> PDF Report</button><button class="btn-sm btn-outline" onclick="downloadReportPdf('statement','')"><i class="fas fa-file-alt"></i> Account Statement</button><button class="btn-sm btn-outline" onclick="window.print()"><i class="fas fa-print"></i> Print</button></div></div>`;
                     html+=`<div class="section-card"><div class="section-title"><i class="fas fa-landmark"></i> Membership & Savings</div><div class="settings-table-wrap"><table class="settings-table"><tbody><tr><th>Member</th><td>${p.full_name||'—'}</td><th>National ID</th><td>${p.id_number||'—'}</td></tr><tr><th>Member Code</th><td>${p.unique_member_id||'—'}</td><th>Account Status</th><td>${p.is_active?'Active':'Pending'}</td></tr><tr><th>Savings Months</th><td>${p.qualifying_savings_months??0}</td><th>Loan Limit</th><td>KES ${Number(p.loan_limit||0).toLocaleString()}</td></tr></tbody></table></div></div>`;
@@ -8259,9 +8344,9 @@ if(app) app.style.display='none'; if(dashboard) dashboard.style.display='none'; 
                 const esc=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
                 const kpi=(label,value,icon)=>`<div class="metric-surface"><div class="metric-label"><i class="fas ${icon}"></i> ${label}</div><div class="metric-value">${value}</div></div>`;
                 let html=`<div class="dashboard-body"><div class="welcome-hero"><div><div class="welcome-kicker">Management Reporting Centre</div><div class="welcome-title">SND Brightlife CBO Reports</div><div class="welcome-sub">Live management, financial, lending, reconciliation and risk reporting.</div></div><div class="member-code-card"><div class="code-label">Generated</div><div class="code">${date(result.generatedAt)}</div><div class="code-name">Live database data</div></div></div>`;
-                html+=`<div class="section-card" id="reportDirectory"><div class="section-title"><i class="fas fa-list-check"></i> Reports Available</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px">${[
-'1. Executive Summary','2. Membership Report','3. Registration Fees','4. Savings & Contributions','5. Loans & Disbursements','6. Loan Repayments & Collection','7. Loan Aging','8. Defaults / Risk','9. Guarantor Requests & History','10. Withdrawals','11. M-Pesa & Transaction Reconciliation','12. Member Loan Growth','13. Performance / 12-Month Activity','14. Audit Trail','15. Member Search & Filters','16. PDF Report','17. CSV Transaction Export','18. Print Report'].map((x,i)=>`<button class="btn-sm btn-outline" style="text-align:left" onclick="document.getElementById('reportSection${i+1}')?.scrollIntoView({behavior:'smooth',block:'start'})">${x}</button>`).join('')}</div></div>`;
-html+=`<div class="section-card" id="reportFilters"><div class="section-title"><i class="fas fa-filter"></i> Report Filters</div><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><label>From <input id="reportFrom" type="date" class="form-control" style="max-width:170px"></label><label>To <input id="reportTo" type="date" class="form-control" style="max-width:170px"></label><button class="btn-sm btn-primary" onclick="applyManagementReportFilters()"><i class="fas fa-filter"></i> Apply</button><button class="btn-sm btn-outline" onclick="clearManagementReportFilters()">Clear</button><button class="btn-sm btn-outline" onclick="window.print()"><i class="fas fa-print"></i> Print</button></div></div>`;
+                html+=`<div class="report-toolbar"><div class="report-toolbar-left"><span class="report-filter-label"><i class="fas fa-calendar-days"></i> Reporting period</span><input id="reportFrom" type="date" class="report-filter-input"><span class="report-filter-label">to</span><input id="reportTo" type="date" class="report-filter-input"><button class="btn-sm btn-primary" onclick="applyManagementReportFilters()"><i class="fas fa-filter"></i> Apply</button><button class="btn-sm btn-outline" onclick="clearManagementReportFilters()">Clear</button></div><div class="report-toolbar-actions"><button class="btn-sm btn-primary" onclick="downloadReportPdf('summary','')"><i class="fas fa-file-pdf"></i> PDF</button><button class="btn-sm btn-outline" onclick="exportAdminTransactions()"><i class="fas fa-file-csv"></i> CSV</button><button class="btn-sm btn-outline" onclick="window.print()"><i class="fas fa-print"></i> Print</button></div></div><div class="section-card" id="reportDirectory"><div class="section-title"><i class="fas fa-list-check"></i> Reports Available</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px">${[
+'1. Executive Summary','2. Membership Report','3. Registration Fees','4. Savings & Contributions','5. Loans & Disbursements','6. Loan Repayments & Collection','7. Loan Aging','8. Defaults / Risk','9. Guarantor Requests & History','10. Withdrawals','11. M-Pesa & Transaction Reconciliation','12. Member Loan Growth','13. Performance / 12-Month Activity','14. Audit Trail','15. Member Search & Filters','16. PDF Report','17. CSV Transaction Export','18. Print Report'].map((x,i)=>`<button class="report-link-card" onclick="document.getElementById('reportSection${i+1}')?.scrollIntoView({behavior:'smooth',block:'start'})"><i class="fas ${['fa-chart-pie','fa-users','fa-receipt','fa-piggy-bank','fa-hand-holding-dollar','fa-money-check-dollar','fa-hourglass-half','fa-triangle-exclamation','fa-user-shield','fa-money-bill-transfer','fa-arrows-rotate','fa-chart-line','fa-chart-column','fa-shield-halved','fa-magnifying-glass','fa-file-pdf','fa-file-csv','fa-print'][i]}"></i><span><span class="report-link-title">${x.replace(/^\d+\. /,'')}</span><span class="report-link-desc">Open report section</span></span></button>`).join('')}</div></div>`;
+
                 html+=`<div class="section-card" id="reportSection1"><div class="section-title"><i class="fas fa-gauge-high"></i> 1. Executive Summary</div><div class="metric-grid">${kpi('Total Members',s.totalMembers,'fa-users')}${kpi('Active Members',s.activeMembers,'fa-user-check')}${kpi('Savings',money(s.savings),'fa-piggy-bank')}${kpi('Registration Fees',money(s.registrationFees),'fa-id-card')}${kpi('Active Loans',s.activeLoans,'fa-hand-holding-dollar')}${kpi('Outstanding Loan Balance',money(s.activeLoanBalance),'fa-scale-balanced')}${kpi('Repayments',money(s.repayments),'fa-money-bill-transfer')}${kpi('Withdrawals',money(s.withdrawals),'fa-arrow-up-from-bracket')}${kpi('Net Fund Movement',money(s.netFundMovement),'fa-chart-line')}${kpi('Overdue Loans',s.overdueLoans,'fa-triangle-exclamation')}${kpi('Defaults',s.defaultedLoans,'fa-circle-exclamation')}${kpi('Collection Rate',pct(s.collectionRate),'fa-percent')}</div></div>`;
                 html+=`<div class="section-card" id="reportSection2"><div class="section-title"><i class="fas fa-users"></i> 2. Membership Report</div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"><input id="reportMemberSearch" oninput="filterLeadingMembers()" placeholder="Search member reference" style="flex:1;min-width:220px"><select id="reportMemberStatus" onchange="filterLeadingMembers()"><option value="all">All statuses</option><option value="Active">Active</option><option value="Pending">Pending</option></select><input id="reportMinSavings" oninput="filterLeadingMembers()" type="number" min="0" placeholder="Min savings"></div><div class="settings-table-wrap"><table class="settings-table" id="leadingMembersTable"><thead><tr><th>Member ID</th><th>Member Name</th><th>Status</th><th>Savings</th><th>Saving Months</th><th>Loan Limit</th><th>Tier</th><th>Loans</th><th>Completed</th><th>Defaults</th></tr></thead><tbody>${members.map(m=>`<tr data-search="${esc(String(m.report_ref||'').toLowerCase())}" data-status="${m.status}" data-savings="${m.savings}"><td>${esc(m.report_ref||m.member_id_display||'—')}</td><td>${esc(m.member_name||m.full_name||'—')}</td><td>${esc(m.status)}</td><td>${money(m.savings)}</td><td>${m.accountAgeMonths||0}</td><td>${money(m.loanLimit)}</td><td>${esc(m.tier)}</td><td>${m.loans||0}</td><td>${m.completed||0}</td><td>${m.defaulted||0}</td></tr>`).join('')}</tbody></table></div></div>`;
                 const fees=tx.filter(t=>t.type==='registration'&&t.status==='completed');
