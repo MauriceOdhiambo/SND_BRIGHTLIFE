@@ -7,9 +7,9 @@ import crypto from 'node:crypto';
 const CONFIG = {
   SUPABASE_URL: process.env.SUPABASE_URL || 'https://kzikcysagysqyezferlr.supabase.co',
   SUPABASE_SECRET_KEY: process.env.SUPABASE_SECRET_KEY || '',
-  ADMIN_WHATSAPP: process.env.ADMIN_WHATSAPP || '+254711765739',
+  ADMIN_WHATSAPP: process.env.ADMIN_WHATSAPP || '+254111640106',
   PAYBILL_NUMBER: process.env.PAYBILL_NUMBER || '247247',
-  PAYBILL_ACCOUNT: process.env.PAYBILL_ACCOUNT || '+254711765739',
+  PAYBILL_ACCOUNT: process.env.PAYBILL_ACCOUNT || '0960179935983',
   REGISTRATION_FEE: 500,
   MIN_SAVINGS_MONTHS: 3,
   MAX_LOAN_MULTIPLIER: 3,
@@ -5991,36 +5991,136 @@ function setupPendingApprovalsTrigger(){return {success:true,message:'Use Vercel
 function initializeEmailTriggers(){return {success:true,message:'Vercel Cron replaces Apps Script triggers.'};}
 
 
+function pdfEscapeText_(value){
+  return String(value == null ? '' : value)
+    .replace(/\\/g,'\\\\')
+    .replace(/\(/g,'\\(')
+    .replace(/\)/g,'\\)')
+    .replace(/\r?\n/g,' ');
+}
+
+function buildSimplePdf_(pages){
+  // Dependency-free PDF writer for Vercel. Uses the standard Helvetica font.
+  // Each page is a list of plain text lines; pagination is handled here.
+  const objects=[];
+  const pageRefs=[];
+  const fontObj=3;
+
+  objects[1]='<< /Type /Catalog /Pages 2 0 R >>';
+  objects[2]='<< /Type /Pages /Kids PAGE_KIDS /Count PAGE_COUNT >>';
+  objects[fontObj]='<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>';
+
+  let nextObj=4;
+  const kids=[];
+
+  pages.forEach(function(lines){
+    const pageObj=nextObj++;
+    const contentObj=nextObj++;
+    const commands=[];
+    commands.push('BT');
+    commands.push('/F1 10 Tf');
+    commands.push('50 790 Td');
+    lines.forEach(function(line, index){
+      if(index>0) commands.push('0 -14 Td');
+      commands.push('('+pdfEscapeText_(line)+') Tj');
+    });
+    commands.push('ET');
+    const stream=commands.join('\n');
+    objects[contentObj]=`<< /Length ${Buffer.byteLength(stream,'utf8')} >>\nstream\n${stream}\nendstream`;
+    objects[pageObj]=`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 ${fontObj} 0 R >> >> /Contents ${contentObj} 0 R >>`;
+    kids.push(`${pageObj} 0 R`);
+  });
+
+  objects[2]=objects[2].replace('PAGE_KIDS',`[${kids.join(' ')}]`).replace('PAGE_COUNT',String(kids.length));
+
+  let pdf='%PDF-1.4\n%\xE2\xE3\xCF\xD3\n';
+  const offsets=[0];
+  for(let i=1;i<objects.length;i++){
+    offsets[i]=Buffer.byteLength(pdf,'binary');
+    pdf+=`${i} 0 obj\n${objects[i]}\nendobj\n`;
+  }
+  const xrefOffset=Buffer.byteLength(pdf,'binary');
+  pdf+=`xref\n0 ${objects.length}\n0000000000 65535 f \n`;
+  for(let i=1;i<objects.length;i++){
+    pdf+=String(offsets[i]).padStart(10,'0')+' 00000 n \n';
+  }
+  pdf+=`trailer\n<< /Size ${objects.length} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+  return Buffer.from(pdf,'binary').toString('base64');
+}
+
 async function generateReportPdf(data){
   try{
     const report=await getReportData(data||{});
-    const doc=new PDFDocument({size:'A4',margin:40});
-    const chunks=[]; doc.on('data',c=>chunks.push(c));
-    const done=new Promise((resolve,reject)=>{doc.on('end',resolve);doc.on('error',reject);});
-    doc.fontSize(20).text('SND BRIGHTLIFE CBO',{align:'center'});
-    doc.moveDown(0.5).fontSize(12).text('Savings & Loans Management Report',{align:'center'});
-    doc.moveDown();
+    const lines=[];
+    lines.push('SND BRIGHTLIFE CBO');
+    lines.push('Savings & Loans Management Report');
+    lines.push('Generated: '+formatKenyaDateTime_(new Date()));
+    lines.push('');
+
     if(report.organization){
       const members=report.members||[], tx=report.transactions||[], loans=report.loans||[];
       const totalSavings=tx.filter(t=>t.type==='savings'&&t.status==='completed').reduce((a,t)=>a+numberValue(t.amount),0);
       const repayments=tx.filter(t=>t.type==='loan_repayment'&&t.status==='completed').reduce((a,t)=>a+numberValue(t.amount),0);
       const disbursed=loans.filter(l=>['active','completed','defaulted'].includes(l.status)).reduce((a,l)=>a+numberValue(l.amount),0);
-      doc.fontSize(11).text(`Members: ${members.length}`);doc.text(`Savings: ${formatKes(totalSavings)}`);doc.text(`Repayments: ${formatKes(repayments)}`);doc.text(`Loans disbursed: ${formatKes(disbursed)}`);doc.moveDown();
-      members.slice(0,100).forEach(m=>doc.fontSize(8).text(`${m.unique_member_id||''} | ${m.full_name||''} | ${m.is_active?'Active':'Pending'} | Savings ${formatKes(m.savings_balance)}`));
+
+      lines.push('ORGANIZATION SUMMARY');
+      lines.push('Members: '+members.length);
+      lines.push('Savings: '+formatKes(totalSavings));
+      lines.push('Repayments: '+formatKes(repayments));
+      lines.push('Loans disbursed: '+formatKes(disbursed));
+      lines.push('');
+      lines.push('MEMBER SUMMARY');
+      members.slice(0,250).forEach(function(m){
+        lines.push(
+          `${m.unique_member_id||''} | ${m.full_name||''} | ${m.is_active?'Active':'Pending'} | Savings ${formatKes(m.savings_balance)}`
+        );
+      });
     }else{
-      const m=report.member||{}; const tx=report.transactions||[], loans=report.loans||[], reps=report.repayments||[];
-      doc.fontSize(13).text(`${m.full_name||'Member'} — ${m.unique_member_id||''}`);doc.moveDown();
+      const m=report.member||{}, tx=report.transactions||[], loans=report.loans||[], reps=report.repayments||[];
       const savings=tx.filter(t=>t.type==='savings'&&t.status==='completed').reduce((a,t)=>a+numberValue(t.amount),0);
       const repayments=reps.reduce((a,t)=>a+numberValue(t.amount),0);
       const loaned=loans.reduce((a,t)=>a+numberValue(t.amount),0);
-      doc.fontSize(10).text(`Savings balance: ${formatKes(m.savings_balance)}`);doc.text(`Total savings: ${formatKes(savings)}`);doc.text(`Loans taken: ${formatKes(loaned)}`);doc.text(`Repayments: ${formatKes(repayments)}`);doc.moveDown();
-      doc.fontSize(11).text('Loan History');loans.slice(0,100).forEach(l=>doc.fontSize(8).text(`${formatKenyaDate_(new Date(l.application_date||l.created_at))} | ${formatKes(l.amount)} | ${l.status||''} | Due ${formatKes(l.total_repayment)}`));doc.moveDown();
-      doc.fontSize(11).text('Recent Transactions');tx.slice(0,100).forEach(t=>doc.fontSize(8).text(`${formatKenyaDate_(new Date(t.created_at))} | ${t.type||''} | ${formatKes(t.amount)} | ${t.status||''} | ${t.mpesa_code||''}`));
+
+      lines.push('MEMBER STATEMENT');
+      lines.push('Member: '+(m.full_name||'Member'));
+      lines.push('Member Code: '+(m.unique_member_id||''));
+      lines.push('Account Status: '+(m.is_active?'Active':'Pending'));
+      lines.push('Savings Balance: '+formatKes(m.savings_balance));
+      lines.push('Total Savings: '+formatKes(savings));
+      lines.push('Loans Taken: '+formatKes(loaned));
+      lines.push('Repayments: '+formatKes(repayments));
+      lines.push('');
+      lines.push('LOAN HISTORY');
+      loans.slice(0,150).forEach(function(l){
+        lines.push(`${formatKenyaDate_(new Date(l.application_date||l.created_at))} | ${formatKes(l.amount)} | ${l.status||''} | Due ${formatKes(l.total_repayment)}`);
+      });
+      lines.push('');
+      lines.push('RECENT TRANSACTIONS');
+      tx.slice(0,150).forEach(function(t){
+        lines.push(`${formatKenyaDate_(new Date(t.created_at))} | ${t.type||''} | ${formatKes(t.amount)} | ${t.status||''} | ${t.mpesa_code||''}`);
+      });
     }
-    doc.end(); await done; const base64=Buffer.concat(chunks).toString('base64');
+
+    // Keep each page below the printable line limit.
+    const pageSize=50;
+    const pages=[];
+    for(let i=0;i<lines.length;i+=pageSize) pages.push(lines.slice(i,i+pageSize));
+    if(!pages.length) pages.push(['No report data available.']);
+
+    const base64=buildSimplePdf_(pages);
     const id=report.organization?'organization':(report.member?.unique_member_id||'member');
-    return {success:true,filename:`Brightlife_${id}_Report_${formatDate_(new Date(),'Africa/Nairobi','yyyyMMdd_HHmm')}.pdf`,mimeType:'application/pdf',base64};
-  }catch(e){Logger.log('PDF report error: '+e.stack);return {success:false,message:e.message};}
+    const reportType=String(data&&data.reportType||'summary').replace(/[^a-z0-9_-]/gi,'')||'summary';
+    return {
+      success:true,
+      filename:`Brightlife_${id}_${reportType}_${formatDate_(new Date(),'Africa/Nairobi','yyyyMMdd_HHmm')}.pdf`,
+      mimeType:'application/pdf',
+      base64:base64,
+      pages:pages.length
+    };
+  }catch(e){
+    Logger.log('PDF report error: '+(e.stack||e.message));
+    return {success:false,message:e.message};
+  }
 }
 
 
