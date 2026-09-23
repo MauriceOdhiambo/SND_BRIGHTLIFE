@@ -5997,7 +5997,18 @@ function initializeEmailTriggers(){return {success:true,message:'Vercel Cron rep
 
 
 function pdfEscapeText_(value){
-  return String(value == null ? '' : value)
+  // Helvetica Type1 uses a limited single-byte character set.
+  // Convert unsupported Unicode punctuation/letters so the generated PDF
+  // remains structurally valid and opens consistently in browsers and PDF readers.
+  var text=String(value == null ? '' : value)
+    .replace(/[\u2018\u2019]/g,"'")
+    .replace(/[\u201c\u201d]/g,'"')
+    .replace(/[\u2013\u2014]/g,'-')
+    .replace(/\u2022/g,'-')
+    .replace(/\u2026/g,'...')
+    .replace(/\u00a0/g,' ');
+  text=text.replace(/[^\x20-\x7E\xA0-\xFF]/g,'?');
+  return text
     .replace(/\\/g,'\\\\')
     .replace(/\(/g,'\\(')
     .replace(/\)/g,'\\)')
@@ -6044,6 +6055,7 @@ function buildProfessionalPdf_(sections, meta){
     c.push('q'); c.push(pdfColor_(108,60,225)+' rg'); c.push('45 771 24 24 re f'); c.push('Q');
     c.push('BT /F2 10 Tf 1 1 1 rg 48 779 Td (BL) Tj ET');
     c.push('BT /F2 15 Tf 1 1 1 rg 86 780 Td ('+pdfEscapeText_(meta.organization||'SND BRIGHTLIFE CBO')+') Tj ET');
+    c.push('BT /F2 9 Tf 0.78 0.84 0.90 rg 86 751 Td (Professional Management Reporting) Tj ET');
     c.push('BT /F1 8 Tf 0.78 0.84 0.90 rg 86 765 Td (Savings & Loans Management Report) Tj ET');
     c.push('BT /F1 7 Tf 0.45 0.50 0.56 rg 44 34 Td (Confidential • Generated '+pdfEscapeText_(meta.generated||'')+') Tj ET');
     c.push('BT /F1 7 Tf 0.45 0.50 0.56 rg 495 34 Td ('+pageNo+' / '+meta.pageCount+') Tj ET');
@@ -6058,9 +6070,14 @@ function buildProfessionalPdf_(sections, meta){
     rows.push({type:'space'});
   });
 
-  let pages=[], current=[], y=TOP-20;
-  function newPage(){ pages.push(current); current=header(pages.length+1); y=TOP-28; }
-  newPage();
+  // Start with a real page. The previous implementation pushed an empty page
+  // before creating the first page, which could produce a PDF with zero/invalid pages.
+  let pages=[], current=header(1), y=TOP-28;
+  function newPage(){
+    if(current && current.length) pages.push(current);
+    current=header(pages.length+1);
+    y=TOP-28;
+  }
   function ensure(h){ if(y-h<BOTTOM){ newPage(); } }
   function textRow(text,size,bold,color,indent,leading){
     const lines=pdfWrapLines_(text, size<=8?105:size<=10?92:76); const lead=leading||Math.round(size*1.45);
@@ -6087,7 +6104,7 @@ function buildProfessionalPdf_(sections, meta){
     }
     textRow(row.text||'',row.size||8,row.bold||false,row.color||'0.16 0.20 0.25',row.indent||0,row.leading||11);
   });
-  if(!current.length) newPage(); else pages.push(current);
+  if(current && current.length) pages.push(current);
   // Fix page count in each footer by replacing placeholder page numbers.
   const pageCount=pages.length;
   pages=pages.map(function(c,i){
@@ -6095,6 +6112,8 @@ function buildProfessionalPdf_(sections, meta){
     if(idx>=0) c[idx]=`BT /F1 7 Tf 0.45 0.50 0.56 rg 495 34 Td (${i+1} / ${pageCount}) Tj ET`;
     return c;
   });
+  // Materialize each paginated content array into a real PDF page object.
+  pages.forEach(function(pageContent){ addPage(pageContent); });
   objects[2]=objects[2].replace('PAGE_KIDS','['+kids.join(' ')+']').replace('PAGE_COUNT',String(kids.length));
   let pdf='%PDF-1.4\n%\xE2\xE3\xCF\xD3\n'; const offsets=[0];
   for(let i=1;i<objects.length;i++){ offsets[i]=Buffer.byteLength(pdf,'binary'); pdf+=`${i} 0 obj\n${objects[i]}\nendobj\n`; }
@@ -6114,7 +6133,7 @@ async function generateReportPdf(data){
       const repayments=tx.filter(t=>t.type==='loan_repayment'&&t.status==='completed').reduce((a,t)=>a+numberValue(t.amount),0);
       const registrations=tx.filter(t=>t.type==='registration'&&t.status==='completed').reduce((a,t)=>a+numberValue(t.amount),0);
       const disbursed=loans.filter(l=>['active','completed','defaulted'].includes(l.status)).reduce((a,l)=>a+numberValue(l.amount),0);
-      sections.push({title:'Executive Summary',rows:[{type:'kpis',values:[{label:'Members',value:String(members.length)},{label:'Savings',value:formatKes(totalSavings)},{label:'Repayments',value:formatKes(repayments)},{label:'Loans Disbursed',value:formatKes(disbursed)}]},{text:'This report is generated from the live SND Brightlife CBO reporting data available to the authorized account at the time of generation.',size:8}]});
+      sections.push({title:'Executive Summary',rows:[{type:'kpis',values:[{label:'Members',value:String(members.length)},{label:'Savings',value:formatKes(totalSavings)},{label:'Repayments',value:formatKes(repayments)},{label:'Loans Disbursed',value:formatKes(disbursed)}]},{text:'Report status: LIVE DATABASE DATA',size:8,bold:true,color:'0.10 0.45 0.30'},{text:'This report is generated from the live SND Brightlife CBO reporting data available to the authorized account at the time of generation.',size:8},{text:'Confidential management document. Verify figures against the online reporting centre before external distribution.',size:7,color:'0.45 0.50 0.56'}]});
       sections.push({title:'Member Register',rows:[{type:'table',columns:['Member Code','Member Name','Status','Savings'],data:members.slice(0,120).map(m=>[m.unique_member_id||'',m.full_name||'',m.is_active?'Active':'Pending',formatKes(m.savings_balance)])}]});
       sections.push({title:'Recent Transaction Log',rows:[{type:'table',columns:['Date','Member','Type','Amount','Status'],data:tx.slice(0,120).map(t=>[formatKenyaDate_(new Date(t.created_at)),t.member_id||'',t.type||'',formatKes(t.amount),t.status||''])}]});
       sections.push({title:'Audit Log',rows:[{type:'table',columns:['Date','Action','Member','Actor','Status'],data:audit.slice(0,120).map(a=>[formatKenyaDate_(new Date(a.date)),a.action||'',a.member?.report_ref||'',a.actor?.report_ref||'System',a.status||''])}]});
