@@ -4751,12 +4751,12 @@ body:has(#dashboard.brightlife-public-mode) #mobileMenuToggle{display:none!impor
     </div>
 
     
-    <button type="button" class="mobile-menu-toggle hidden" id="mobileMenuToggle" aria-label="Open workspace menu" aria-expanded="false" >
+    <button type="button" class="mobile-menu-toggle hidden" id="mobileMenuToggle" aria-label="Open workspace menu" aria-expanded="false" onclick="toggleMobileSidebar(event)">
         <i class="fas fa-bars"></i>
     </button>
 
     
-    <div class="sidebar-overlay" id="sidebarOverlay" ></div>
+    <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleMobileSidebar()"></div>
 
     
     <nav class="sidebar" id="sidebar">
@@ -4778,7 +4778,7 @@ body:has(#dashboard.brightlife-public-mode) #mobileMenuToggle{display:none!impor
                                 <button class="nav-item active" onclick="navigateTo('home')" id="nav-home"><i class="fas fa-home"></i><span class="nav-text">Home</span></button>
                 <button class="nav-item" onclick="navigateTo('contacts')" id="nav-contacts"><i class="fas fa-address-book"></i><span class="nav-text">Contacts</span></button>
                 <div class="site-nav-group" id="projectsNavGroup">
-                    <button type="button" class="nav-item" onclick="toggleProjectsNav(event)" id="nav-projects" aria-expanded="false" aria-controls="projectsNavGroup"><i class="fas fa-layer-group"></i><span class="nav-text">Projects</span><i class="fas fa-chevron-down site-nav-caret"></i></button>
+                    <button class="nav-item" onclick="toggleProjectsNav(event); navigateTo('projects')" id="nav-projects"><i class="fas fa-layer-group"></i><span class="nav-text">Projects</span><i class="fas fa-chevron-down site-nav-caret"></i></button>
                     <div class="project-subnav" id="projectsSubnav">
                         <button class="nav-item subnav" onclick="openMemberLogin()" id="nav-tablebanking"><i class="fas fa-coins"></i><span class="nav-text">Table Banking</span></button>
                         <button class="nav-item subnav" onclick="navigateTo('project-water')" id="nav-project-water"><i class="fas fa-tint"></i><span class="nav-text">Water Supply</span></button>
@@ -6011,17 +6011,9 @@ function updateUserInfo(member) {
             }
         }
         function toggleProjectsNav(event){
-            if(event){ event.preventDefault(); event.stopPropagation(); }
+            if(event) event.stopPropagation();
             const group=document.getElementById('projectsNavGroup');
-            const trigger=document.getElementById('nav-projects');
-            if(!group) return;
-            const open=!group.classList.contains('open');
-            group.classList.toggle('open', open);
-            if(trigger){
-                trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
-                const caret=trigger.querySelector('.site-nav-caret');
-                if(caret) caret.className=open ? 'fas fa-chevron-up site-nav-caret' : 'fas fa-chevron-down site-nav-caret';
-            }
+            if(group) group.classList.toggle('open');
         }
 
         function renderPublicShell(kicker,title,subtitle,bodyHtml){
@@ -6066,30 +6058,6 @@ function updateUserInfo(member) {
                 return style.display!=='none' && style.visibility!=='hidden';
             }) || list[0] || null;
         }
-        // Reliable delegated menu controls: works for both static and dynamically-rendered headers.
-        document.addEventListener('click', function(e){
-            var homeToggle=e.target.closest && e.target.closest('.brightlife-menu-toggle');
-            if(homeToggle){
-                e.preventDefault();
-                e.stopPropagation();
-                toggleBrightlifeHomeMenu(e);
-                return;
-            }
-            var workspaceToggle=e.target.closest && e.target.closest('#mobileMenuToggle');
-            if(workspaceToggle){
-                e.preventDefault();
-                e.stopPropagation();
-                toggleMobileSidebar(e);
-                return;
-            }
-            var workspaceOverlay=e.target.closest && e.target.closest('#sidebarOverlay');
-            if(workspaceOverlay){
-                e.preventDefault();
-                e.stopPropagation();
-                toggleMobileSidebar(e);
-            }
-        }, true);
-
         function toggleBrightlifeHomeMenu(event){
             if(event){ event.preventDefault(); event.stopPropagation(); }
             var nav=_visibleMenuElement_('#brightlifeHomeNav');
@@ -6138,7 +6106,7 @@ function updateUserInfo(member) {
                             <img src="https://i.ibb.co/Tx5GPpmN/Whats-App-Image-2026-09-04-at-09-51-28.jpg" alt="SND Brightlife CBO" decoding="async">
                             <div><strong>SND BRIGHTLIFE CBO</strong><span>Empowering People. Building Livelihoods. Transforming Communities.</span></div>
                         </div>
-                        <button type="button" class="brightlife-menu-toggle" aria-label="Open website menu" aria-expanded="false" ><i class="fas fa-bars"></i><span>Menu</span></button>
+                        <button type="button" class="brightlife-menu-toggle" aria-label="Open website menu" aria-expanded="false" onclick="toggleBrightlifeHomeMenu(event)"><i class="fas fa-bars"></i><span>Menu</span></button>
                         <nav class="public-top-nav" id="brightlifeHomeNav" aria-label="Main navigation">
                             <button type="button" class="public-top-link active" data-nav="home" onclick="closeBrightlifeHomeMenu();showPublicHome()">Home</button>
                             <button type="button" class="public-top-link" data-nav="about" onclick="closeBrightlifeHomeMenu();showBrightlifeInnerPage('about')">About Us</button>
@@ -6239,7 +6207,7 @@ if(!document.getElementById('brightlifeProjectsPublicHeaderStyles')){var st=docu
             body.innerHTML=`<div class="brightlife-public-page public-projects-landing" id="brightlife-projects-public-page">
                 <header class="brightlife-home-header">
                     <div class="brightlife-home-brand"><img src="https://i.ibb.co/Tx5GPpmN/Whats-App-Image-2026-09-04-at-09-51-28.jpg" alt="SND Brightlife CBO"><div><strong>SND Brightlife CBO</strong><span>Community - Led Solutions for Sustainable Development</span></div></div>
-                    <button type="button" class="brightlife-menu-toggle" aria-label="Open website menu" aria-expanded="false" ><i class="fas fa-bars"></i><span>Menu</span></button>
+                    <button type="button" class="brightlife-menu-toggle" aria-label="Open website menu" aria-expanded="false" onclick="toggleBrightlifeHomeMenu(event)"><i class="fas fa-bars"></i><span>Menu</span></button>
                     <nav class="public-top-nav" id="brightlifeHomeNav" aria-label="Main navigation">
                         <button type="button" class="public-top-link" data-nav="home" onclick="showPublicHome()">Home</button>
                         <button type="button" class="public-top-link" data-nav="about" onclick="showBrightlifeInnerPage('about')">About Us</button>
