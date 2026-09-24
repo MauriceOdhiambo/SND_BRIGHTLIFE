@@ -4751,7 +4751,7 @@ body:has(#dashboard.brightlife-public-mode) #mobileMenuToggle{display:none!impor
     </div>
 
     
-    <button class="mobile-menu-toggle hidden" id="mobileMenuToggle" onclick="toggleMobileSidebar()">
+    <button type="button" class="mobile-menu-toggle hidden" id="mobileMenuToggle" aria-label="Open workspace menu" aria-expanded="false" onclick="toggleMobileSidebar(event)">
         <i class="fas fa-bars"></i>
     </button>
 
@@ -5162,12 +5162,22 @@ window.BRIGHTLIFE_BUILD = 'BRIGHTLIFE-PROFESSIONAL-PUBLIC-PORTAL-2026-09-23';
             }
         }
 
-        function toggleMobileSidebar() {
+        function toggleMobileSidebar(event) {
+            if(event){event.preventDefault();event.stopPropagation();}
             const sidebar = document.getElementById('sidebar');
             const overlay = document.getElementById('sidebarOverlay');
-
-            sidebar.classList.toggle('open');
-            overlay.classList.toggle('show');
+            if(!sidebar || !overlay) return;
+            const open=!sidebar.classList.contains('open');
+            sidebar.classList.toggle('open',open);
+            overlay.classList.toggle('show',open);
+            document.body.classList.toggle('sidebar-menu-open',open);
+            const btn=document.getElementById('mobileMenuToggle');
+            if(btn){
+                btn.setAttribute('aria-expanded',open?'true':'false');
+                btn.setAttribute('aria-label',open?'Close workspace menu':'Open workspace menu');
+                const icon=btn.querySelector('i');
+                if(icon) icon.className=open?'fas fa-xmark':'fas fa-bars';
+            }
         }
 
         window.addEventListener('resize', function() {
@@ -5179,6 +5189,7 @@ window.BRIGHTLIFE_BUILD = 'BRIGHTLIFE-PROFESSIONAL-PUBLIC-PORTAL-2026-09-23';
             if (window.innerWidth > 768) {
                 sidebar.classList.remove('open');
                 overlay.classList.remove('show');
+                document.body.classList.remove('sidebar-menu-open');
                 if (sidebar.classList.contains('visible')) {
                     main.classList.add('with-sidebar');
                 }
@@ -6040,29 +6051,36 @@ function updateUserInfo(member) {
             return /^https?:\/\//i.test(url) ? url : '';
         }
 
+        function _visibleMenuElement_(selector){
+            var list=Array.prototype.slice.call(document.querySelectorAll(selector));
+            return list.find(function(el){
+                var style=window.getComputedStyle(el);
+                return style.display!=='none' && style.visibility!=='hidden';
+            }) || list[0] || null;
+        }
         function toggleBrightlifeHomeMenu(event){
-            if(event && event.stopPropagation) event.stopPropagation();
-            var nav=document.getElementById('brightlifeHomeNav');
-            var toggle=document.querySelector('.brightlife-menu-toggle');
+            if(event){ event.preventDefault(); event.stopPropagation(); }
+            var nav=_visibleMenuElement_('#brightlifeHomeNav');
+            var toggle=_visibleMenuElement_('.brightlife-menu-toggle');
             if(!nav) return;
-            var open=nav.classList.toggle('is-open');
+            var open=!nav.classList.contains('is-open');
+            document.querySelectorAll('#brightlifeHomeNav').forEach(function(n){n.classList.remove('is-open');});
+            if(open) nav.classList.add('is-open');
             if(toggle){
-                toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-                toggle.setAttribute('aria-label', open ? 'Close website menu' : 'Open website menu');
+                toggle.setAttribute('aria-expanded',open?'true':'false');
+                toggle.setAttribute('aria-label',open?'Close website menu':'Open website menu');
                 var icon=toggle.querySelector('i');
-                if(icon) icon.className=open ? 'fas fa-xmark' : 'fas fa-bars';
+                if(icon) icon.className=open?'fas fa-xmark':'fas fa-bars';
             }
         }
         function closeBrightlifeHomeMenu(){
-            var nav=document.getElementById('brightlifeHomeNav');
-            var toggle=document.querySelector('.brightlife-menu-toggle');
-            if(nav) nav.classList.remove('is-open');
-            if(toggle){
+            document.querySelectorAll('#brightlifeHomeNav').forEach(function(nav){nav.classList.remove('is-open');});
+            document.querySelectorAll('.brightlife-menu-toggle').forEach(function(toggle){
                 toggle.setAttribute('aria-expanded','false');
                 toggle.setAttribute('aria-label','Open website menu');
                 var icon=toggle.querySelector('i');
                 if(icon) icon.className='fas fa-bars';
-            }
+            });
         }
         document.addEventListener('click', function(e){
             if(!e.target.closest('.brightlife-home-header')) closeBrightlifeHomeMenu();
@@ -10715,11 +10733,13 @@ html+=`<div class="section-card" id="reportFilters"><div class="section-title"><
         });
 
         function toggleBrightlifeInnerMenu(event){
-            if(event && event.stopPropagation) event.stopPropagation();
-            var nav=document.getElementById('brightlifeInnerNav');
-            var toggle=document.querySelector('.bl-inner-menu-toggle');
+            if(event){ event.preventDefault(); event.stopPropagation(); }
+            var nav=_visibleMenuElement_('#brightlifeInnerNav');
+            var toggle=_visibleMenuElement_('.bl-inner-menu-toggle');
             if(!nav) return;
-            var open=nav.classList.toggle('is-open');
+            var open=!nav.classList.contains('is-open');
+            document.querySelectorAll('#brightlifeInnerNav').forEach(function(n){n.classList.remove('is-open');});
+            if(open) nav.classList.add('is-open');
             if(toggle){
                 toggle.setAttribute('aria-expanded',open?'true':'false');
                 toggle.setAttribute('aria-label',open?'Close website menu':'Open website menu');
@@ -10728,15 +10748,13 @@ html+=`<div class="section-card" id="reportFilters"><div class="section-title"><
             }
         }
         function closeBrightlifeInnerMenu(){
-            var nav=document.getElementById('brightlifeInnerNav');
-            var toggle=document.querySelector('.bl-inner-menu-toggle');
-            if(nav) nav.classList.remove('is-open');
-            if(toggle){
+            document.querySelectorAll('#brightlifeInnerNav').forEach(function(nav){nav.classList.remove('is-open');});
+            document.querySelectorAll('.bl-inner-menu-toggle').forEach(function(toggle){
                 toggle.setAttribute('aria-expanded','false');
                 toggle.setAttribute('aria-label','Open website menu');
                 var icon=toggle.querySelector('i');
                 if(icon) icon.className='fas fa-bars';
-            }
+            });
         }
 
         function showBrightlifeInnerPage(page, pushHistory){
@@ -11315,6 +11333,86 @@ html+=`<div class="section-card" id="reportFilters"><div class="section-title"><
 @media(max-width:1080px){.brightlife-reference-home .brightlife-home-header{grid-template-columns:minmax(0,1fr) auto!important}.brightlife-reference-home .public-top-nav{display:none!important}.brightlife-reference-home .brightlife-menu-toggle{display:inline-flex!important}.brightlife-reference-home .public-top-nav.is-open{display:grid!important;grid-column:1/-1!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;width:100%!important;padding:8px!important;border-radius:14px!important;background:rgba(22,22,100,.98)!important;border:1px solid rgba(255,255,255,.18)!important;box-shadow:0 15px 30px rgba(0,0,0,.22)!important}.brightlife-reference-home .public-top-nav.is-open .public-top-link,.brightlife-reference-home .public-top-nav.is-open .public-top-login,.brightlife-reference-home .public-top-nav.is-open .public-top-member{width:100%!important;display:block!important;text-align:center!important;color:#fff!important}.brightlife-reference-home .public-top-nav.is-open .public-top-login{grid-column:auto!important}.brightlife-reference-home .public-top-nav.is-open .public-top-member{background:#fff!important;color:#172554!important}}
 @media(max-width:760px){.brightlife-reference-home .brightlife-home-header{padding:9px 14px!important}.brightlife-reference-home .brightlife-home-brand img{width:46px!important;height:46px!important}.brightlife-reference-home .brightlife-home-brand strong{font-size:14px!important}.brightlife-reference-home .brightlife-home-brand span{font-size:8px!important}.brightlife-reference-home .public-top-nav.is-open{grid-template-columns:repeat(2,minmax(0,1fr))!important}.brightlife-reference-home .reference-hero{min-height:680px!important;padding:55px 18px 25px!important;background-size:100% 50%,100% 50%!important;background-position:center top,center bottom!important}.brightlife-reference-home .reference-hero::before{background:linear-gradient(180deg,rgba(4,19,44,.46),rgba(4,19,44,.86) 42%,rgba(4,19,44,.86) 60%,rgba(4,19,44,.50))!important}.brightlife-reference-home .reference-hero::after{left:10%!important;width:80%!important;clip-path:none!important;background:rgba(3,20,48,.22)!important}.brightlife-reference-home .reference-kicker{font-size:11px!important;letter-spacing:2.4px!important}.brightlife-reference-home .reference-hero h1{font-size:clamp(34px,9vw,47px)!important;letter-spacing:-1.1px!important}.brightlife-reference-home .reference-hero p{font-size:15px!important}.brightlife-reference-home .reference-values{gap:6px!important;padding:9px 12px!important;max-width:100%!important}.brightlife-reference-home .reference-values span{font-size:10px!important;letter-spacing:.8px!important}.brightlife-reference-home .reference-focus-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}.brightlife-reference-home .reference-focus-card:nth-child(2n){border-right:0!important}.brightlife-reference-home .reference-focus-card{border-bottom:1px solid #e7edf4!important}.brightlife-reference-home .reference-home-bottom{margin:14px 14px 22px!important;display:block!important;padding:27px 21px!important}.brightlife-reference-home .reference-bottom-actions{margin-top:18px!important}.brightlife-reference-home .reference-footer{grid-template-columns:1fr!important;text-align:center!important}.brightlife-reference-home .reference-footer-brand{justify-content:center!important}.brightlife-reference-home .reference-footer-links{justify-content:center!important}.brightlife-reference-home .reference-footer-contact{align-items:center!important}.brightlife-reference-home .reference-footer-line{grid-column:1!important}.brightlife-reference-home .reference-footer>b{grid-column:1!important}}
 @media(max-width:430px){.brightlife-reference-home .public-top-nav.is-open{grid-template-columns:1fr!important}.brightlife-reference-home .reference-actions{flex-direction:column!important}.brightlife-reference-home .reference-actions .public-action{width:100%!important}.brightlife-reference-home .reference-values{flex-wrap:wrap!important}.brightlife-reference-home .reference-focus-grid{grid-template-columns:1fr!important}.brightlife-reference-home .reference-focus-card{border-right:0!important}.brightlife-reference-home .reference-footer-links i{display:none!important}}
+
+/* SND Brightlife final responsive/mobile navigation hardening */
+html,body{width:100%;max-width:100%;overflow-x:hidden!important}
+body{min-width:320px}
+button,a,input,select,textarea{touch-action:manipulation}
+img{max-width:100%;height:auto}
+
+/* Public/home navigation: one stable layout at every breakpoint */
+.brightlife-home-header{width:100%;box-sizing:border-box}
+.brightlife-home-header .brightlife-home-brand{min-width:0;flex:1 1 auto}
+.brightlife-home-header .public-top-nav{min-width:0}
+.brightlife-menu-toggle{position:relative!important;z-index:10003!important;pointer-events:auto!important;touch-action:manipulation!important}
+@media(max-width:1080px){
+  .brightlife-reference-home .brightlife-home-header,
+  .brightlife-home-header{display:grid!important;grid-template-columns:minmax(0,1fr) auto!important;align-items:center!important;gap:10px!important}
+  .brightlife-reference-home .public-top-nav,
+  .brightlife-home-header .public-top-nav{display:none!important;grid-column:1/-1!important;width:100%!important;min-width:0!important;box-sizing:border-box!important}
+  .brightlife-reference-home .public-top-nav.is-open,
+  .brightlife-home-header .public-top-nav.is-open{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:6px!important;overflow:visible!important;white-space:normal!important}
+  .brightlife-reference-home .brightlife-menu-toggle,
+  .brightlife-home-header .brightlife-menu-toggle{display:inline-flex!important;align-items:center!important;justify-content:center!important;min-height:42px!important}
+  .brightlife-home-header .public-top-link,
+  .brightlife-home-header .public-top-login{width:100%!important;min-width:0!important;white-space:normal!important}
+}
+@media(max-width:760px){
+  .brightlife-home-header{padding:9px 14px!important}
+  .brightlife-home-brand{gap:9px!important}
+  .brightlife-home-brand img{width:44px!important;height:44px!important;flex:0 0 44px!important}
+  .brightlife-home-brand strong{font-size:14px!important;line-height:1.2!important}
+  .brightlife-home-brand span{font-size:8px!important;line-height:1.3!important;max-width:230px!important}
+  .brightlife-reference-home .public-top-nav.is-open,
+  .brightlife-home-header .public-top-nav.is-open{grid-template-columns:repeat(2,minmax(0,1fr))!important;padding:8px!important}
+  .brightlife-home-header .public-top-link,.brightlife-home-header .public-top-login{padding:11px 8px!important;min-height:42px!important}
+}
+@media(max-width:430px){
+  .brightlife-home-header{padding:8px 12px!important}
+  .brightlife-home-brand span{display:none!important}
+  .brightlife-reference-home .public-top-nav.is-open,
+  .brightlife-home-header .public-top-nav.is-open{grid-template-columns:1fr!important}
+  .brightlife-menu-toggle{padding:9px 10px!important;min-height:40px!important}
+}
+
+/* Inner/public content pages */
+.bl-inner-header{width:100%;box-sizing:border-box}
+.bl-inner-header .bl-inner-head{width:100%;min-width:0}
+.bl-inner-header .bl-brand{min-width:0;flex:1 1 auto}
+.bl-inner-menu-toggle{position:relative!important;z-index:10003!important;pointer-events:auto!important;touch-action:manipulation!important}
+@media(max-width:900px){
+  .bl-inner-header .bl-inner-head{display:grid!important;grid-template-columns:minmax(0,1fr) auto!important;align-items:center!important;gap:10px!important}
+  .bl-inner-header nav{display:none!important;grid-column:1/-1!important;width:100%!important;min-width:0!important}
+  .bl-inner-header nav.is-open{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;overflow:visible!important}
+  .bl-inner-menu-toggle{display:inline-flex!important;align-items:center!important;justify-content:center!important;min-height:42px!important}
+  .bl-inner-header nav button{width:100%!important;min-width:0!important}
+}
+@media(max-width:430px){
+  .bl-inner-header nav.is-open{grid-template-columns:1fr!important}
+  .bl-inner-header .bl-brand small{display:none!important}
+}
+
+/* Logged-in workspace: make controls fit narrow screens */
+@media(max-width:768px){
+  .dashboard-body,.main-wrapper{width:100%!important;max-width:100%!important;min-width:0!important;box-sizing:border-box!important}
+  .main-wrapper{padding:10px!important}
+  .dashboard-body{padding:10px!important}
+  .page-header,.page-header-actions,.member-topbar,.member-topbar-actions{max-width:100%!important;min-width:0!important}
+  .member-topbar{gap:8px!important;flex-wrap:wrap!important}
+  .member-topbar-actions{margin-left:auto!important;flex-wrap:wrap!important}
+  .table-responsive,.table-container,.data-table-container{max-width:100%!important;overflow-x:auto!important;-webkit-overflow-scrolling:touch!important}
+  .modal{width:calc(100vw - 24px)!important;max-width:calc(100vw - 24px)!important;margin:12px!important}
+  .form-row,.form-grid{grid-template-columns:1fr!important}
+}
+
+/* Mobile workspace drawer: reliable touch target and safe overlay */
+@media(max-width:768px){
+  #mobileMenuToggle{display:flex!important;position:fixed!important;right:16px!important;bottom:16px!important;width:50px!important;height:50px!important;z-index:10001!important;pointer-events:auto!important}
+  #sidebarOverlay{z-index:9998!important}
+  #sidebar{z-index:10000!important}
+  #sidebar.open{box-shadow:18px 0 45px rgba(15,23,42,.20)!important}
+  body.sidebar-menu-open{overflow:hidden!important}
+}
 </style>
 </body>
 </html>
