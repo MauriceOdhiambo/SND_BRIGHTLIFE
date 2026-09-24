@@ -5728,6 +5728,7 @@ function updateUserInfo(member) {
                 showSidebar();
                 currentUser = member;
             cacheMemberSession_(currentUser);
+            if (window.ensureWorkspaceNavigation) window.ensureWorkspaceNavigation(currentUser);
             } else {
                 document.getElementById('userAvatar').textContent = 'G';
                 document.getElementById('userName').textContent = 'Guest';
@@ -5850,6 +5851,7 @@ function updateUserInfo(member) {
             if(adminSection) adminSection.style.display=(role==='admin'||role==='super_admin'||role==='treasurer'||role==='customer_care'||role==='profile_approver')?'block':'none';
             updateUserInfo(member);
             updateMemberTopbar(member);
+            if (window.ensureWorkspaceNavigation) window.ensureWorkspaceNavigation(member);
         }
         async function loginUser(event) {
             event.preventDefault();
@@ -11375,6 +11377,107 @@ html+=`<div class="section-card" id="reportFilters"><div class="section-title"><
   .public-unified-header nav.is-open{grid-template-columns:1fr!important;}
 }
 </style>
+
+<style id="snd-workspace-navigation-final">
+/* Production workspace navigation: always readable, touch-friendly and permission-safe. */
+#sidebar.workspace-ready{background:#fff!important;color:#1f2937!important;}
+#sidebar.workspace-ready .sidebar-nav{visibility:visible!important;opacity:1!important;}
+#sidebar.workspace-ready .nav-section{visibility:visible!important;}
+#sidebar.workspace-ready .nav-item,
+#sidebar.workspace-ready .hierarchy-toggle{color:#344054!important;}
+#sidebar.workspace-ready .nav-item .nav-text,
+#sidebar.workspace-ready .hierarchy-title span{color:inherit!important;display:inline-block!important;visibility:visible!important;opacity:1!important;}
+#sidebar.workspace-ready .nav-item i,
+#sidebar.workspace-ready .hierarchy-title i{color:#667085!important;visibility:visible!important;opacity:1!important;}
+#sidebar.workspace-ready .nav-item.active{color:#fff!important;}
+#sidebar.workspace-ready .nav-item.active i,
+#sidebar.workspace-ready .nav-item.active .nav-text{color:#fff!important;}
+#sidebar.workspace-ready .section-label{color:#98a2b3!important;display:block!important;visibility:visible!important;}
+#sidebar.workspace-ready .hierarchy-toggle{min-height:42px!important;}
+#sidebar.workspace-ready .hierarchy-children{display:block;visibility:visible;}
+#sidebar.workspace-ready .admin-nav-group.collapsed .hierarchy-children,
+#sidebar.workspace-ready .secure-nav-group.collapsed .hierarchy-children{display:none;}
+#sidebar.workspace-ready .nav-item[style*="display: none"]{display:none!important;}
+#sidebar.workspace-ready .workspace-empty-state{padding:18px 14px;color:#667085;font-size:12px;line-height:1.6;}
+#sidebar.workspace-ready .sidebar-user{background:#fff;}
+@media(max-width:768px){
+  #sidebar.workspace-ready{width:min(88vw,320px)!important;max-width:320px!important;}
+  #sidebar.workspace-ready .sidebar-nav{padding:12px 10px 18px!important;overscroll-behavior:contain!important;}
+  #sidebar.workspace-ready .nav-item,
+  #sidebar.workspace-ready .hierarchy-toggle{min-height:46px!important;padding-top:11px!important;padding-bottom:11px!important;touch-action:manipulation!important;}
+  #sidebar.workspace-ready .nav-item{font-size:13px!important;}
+  #sidebar.workspace-ready .sidebar-overlay{touch-action:none;}
+}
+</style>
+<script>
+(function(){
+  function workspaceEl(id){return document.getElementById(id);}
+  function setWorkspaceDisplay(id,show){
+    var el=workspaceEl(id); if(!el)return;
+    el.style.display=show?'flex':'none';
+    el.setAttribute('aria-hidden',show?'false':'true');
+  }
+  function normalizePermissions(member){
+    var p=member && member.permissions;
+    if(typeof p==='string'){try{p=JSON.parse(p);}catch(e){p={};}}
+    return p && typeof p==='object' ? p : {};
+  }
+  window.ensureWorkspaceNavigation=function(member){
+    var sidebar=workspaceEl('sidebar');
+    if(!sidebar)return;
+    sidebar.classList.add('workspace-ready');
+    var p=normalizePermissions(member||{});
+    var role=String((member&&member.role)||sessionStorage.getItem('memberRole')||'member').toLowerCase();
+    var logged=!!(member && (member.id||member.idNumber||member.uniqueId)) || !!getCanonicalMemberId();
+    var admin=role==='admin'||role==='super_admin';
+    var management=admin||role==='treasurer'||role==='customer_care'||role==='profile_approver'||!!p.view_reports||!!p.view_members||!!p.loan_approval||!!p.savings_approval||!!p.withdrawal_approval||!!p.registration_approval||!!p.grant_rights||!!p.customer_care||!!p.profile_approval||!!p.data_import||!!p.edit_members||!!p.view_repayments||!!p.view_transactions;
+    var publicSection=workspaceEl('publicSidebarSection');
+    var secure=workspaceEl('secureMemberSection');
+    var adminSection=workspaceEl('adminSection');
+    if(publicSection) publicSection.style.display=logged?'none':'block';
+    if(secure) secure.style.display=logged?'block':'none';
+    if(adminSection) adminSection.style.display=(logged&&management)?'block':'none';
+    if(logged){
+      // Core member workspace is never permission-gated: these are the member's own pages.
+      ['nav-dashboard','nav-savings','nav-loanmanagement','nav-transactions','nav-reports'].forEach(function(id){setWorkspaceDisplay(id,true);});
+      setWorkspaceDisplay('nav-guarantors',false);
+      // Administrative controls are explicitly permission-gated.
+      setWorkspaceDisplay('nav-admin',management);
+      setWorkspaceDisplay('nav-executive',admin||!!p.view_reports);
+      setWorkspaceDisplay('nav-admin-reports',management);
+      setWorkspaceDisplay('nav-members',admin||!!p.view_members);
+      setWorkspaceDisplay('nav-alltransactions',admin||!!p.view_transactions);
+      setWorkspaceDisplay('nav-dataimport',role==='super_admin'||(role==='admin'&&p.data_import===true));
+      setWorkspaceDisplay('nav-admin-repayments',admin||!!p.view_repayments);
+      setWorkspaceDisplay('nav-chat',admin||!!p.customer_care);
+      setWorkspaceDisplay('nav-rights',admin||!!p.grant_rights);
+      setWorkspaceDisplay('nav-admin-profile',admin);
+      setWorkspaceDisplay('nav-adminsettings-main',admin);
+      setWorkspaceDisplay('nav-contentmanagement',admin);
+      setWorkspaceDisplay('nav-settings',true);
+    }
+    // Make every workspace group readable even if an older state left it collapsed.
+    ['secureProjectsGroup','secureTableBankingGroup','adminOverviewGroup','adminOperationsGroup','adminGovernanceGroup'].forEach(function(id){
+      var g=workspaceEl(id); if(!g)return;
+      var trigger=g.querySelector(':scope > .hierarchy-toggle');
+      var children=g.querySelector(':scope > .hierarchy-children');
+      if(trigger && !trigger.hasAttribute('aria-expanded')) trigger.setAttribute('aria-expanded','true');
+      if(children && !g.classList.contains('collapsed')) children.style.display='block';
+    });
+  };
+  document.addEventListener('DOMContentLoaded',function(){
+    setTimeout(function(){
+      try{
+        var sidebar=workspaceEl('sidebar');
+        if(sidebar) sidebar.classList.add('workspace-ready');
+        var id=getCanonicalMemberId();
+        if(id) window.ensureWorkspaceNavigation(window.currentUser||null);
+      }catch(e){console.warn('Workspace navigation initialization:',e);}
+    },0);
+  });
+})();
+</script>
+
 </body>
 </html>
     
