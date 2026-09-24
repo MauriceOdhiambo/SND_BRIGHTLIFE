@@ -770,72 +770,88 @@ async function registerMember(data) {
             return { success: false, message: 'ID number already registered. Please login.' };
         }
         
-        // Brightlife member numbers are sequential: CDO0001, CDO0002, ...
-        // Lock the short critical section so two simultaneous registrations do not receive the same code.
+        // Member numbers are allocated while the database insert is protected by
+        // a server-side lock. The database should also enforce UNIQUE(unique_member_id)
+        // so the constraint remains the final source of truth across multiple instances.
         const lock = LockService.getScriptLock();
-        lock.waitLock(10000);
+        lock.waitLock(15000);
         let uniqueId;
+        let result;
         try {
-            const lastResult = await supabaseRequest('GET', 'members?select=unique_member_id&unique_member_id=like.CDO*&order=unique_member_id.desc&limit=1');
-            let nextNumber = 1;
-            if (lastResult.statusCode === 200 && Array.isArray(lastResult.data) && lastResult.data.length) {
-                const match = String(lastResult.data[0].unique_member_id || '').match(/^CDO(\d+)$/i);
-                if (match) nextNumber = parseInt(match[1], 10) + 1;
+            const hashedPassword = hashPassword(data.password);
+            let allocationAttempts = 0;
+            while (allocationAttempts < 3) {
+                allocationAttempts++;
+                const lastResult = await supabaseRequest(
+                    'GET',
+                    'members?select=unique_member_id&unique_member_id=like.CDO*&order=unique_member_id.desc&limit=1'
+                );
+                let nextNumber = 1;
+                if (lastResult.statusCode === 200 && Array.isArray(lastResult.data) && lastResult.data.length) {
+                    const match = String(lastResult.data[0].unique_member_id || '').match(/^CDO(\d+)$/i);
+                    if (match) nextNumber = parseInt(match[1], 10) + 1;
+                }
+                uniqueId = 'CDO' + String(nextNumber).padStart(4, '0');
+
+                const newMember = {
+                    unique_member_id: uniqueId,
+                    full_name: data.fullName,
+                    id_number: data.idNumber,
+                    phone_number: data.phoneNumber,
+                    email: registrationEmail,
+                    password: hashedPassword,
+                    role: 'member',
+                    registration_fee_paid: false,
+                    registration_fee_status: 'pending',
+                    is_active: false,
+                    biodata_completed: false,
+                    biodata_locked: false,
+                    savings_balance: 0,
+                    registration_fee_amount: 0,
+                    occupation: '',
+                    address: '',
+                    next_of_kin: '',
+                    next_of_kin_phone: '',
+                    next_of_kin_relation: '',
+                    profile_edit_status: 'pending',
+                    loan_limit: 5000,
+                    loan_growth_score: 0,
+                    loan_growth_tier: 'basic',
+                    loan_growth_evaluation: {},
+                    account_age_months: 0,
+                    permissions: {
+                        view_members: false,
+                        loan_approval: false,
+                        savings_approval: false,
+                        withdrawal_approval: false,
+                        registration_approval: false,
+                        grant_rights: false,
+                        customer_care: false,
+                        view_reports: false,
+                        profile_approval: false,
+                        view_savings: false,
+                        edit_members: false,
+                        view_repayments: false,
+                        view_transactions: false
+                    },
+                    registration_date: new Date().toISOString(),
+                    created_at: new Date().toISOString()
+                };
+
+                result = await supabaseRequest('POST', 'members', newMember);
+                if (result.statusCode === 201) break;
+
+                const message = String(result.data?.message || result.data?.error || '');
+                const isUniqueCollision = result.statusCode === 409 ||
+                    /unique_member_id|duplicate key|duplicate/i.test(message);
+                if (!isUniqueCollision || allocationAttempts >= 3) {
+                    throw new Error(message || 'Registration failed');
+                }
             }
-            uniqueId = 'CDO' + String(nextNumber).padStart(4, '0');
         } finally {
             lock.releaseLock();
         }
-        
-        const hashedPassword = hashPassword(data.password);
-        
-        const newMember = {
-            unique_member_id: uniqueId,
-            full_name: data.fullName,
-            id_number: data.idNumber,
-            phone_number: data.phoneNumber,
-            email: registrationEmail,
-            password: hashedPassword,
-            role: 'member',
-            registration_fee_paid: false,
-            registration_fee_status: 'pending',
-            is_active: false,
-            biodata_completed: false,
-            biodata_locked: false,
-            savings_balance: 0,
-            registration_fee_amount: 0,
-            occupation: '',
-            address: '',
-            next_of_kin: '',
-            next_of_kin_phone: '',
-            next_of_kin_relation: '',
-            profile_edit_status: 'pending',
-            loan_limit: 5000,
-            loan_growth_score: 0,
-            loan_growth_tier: 'basic',
-            loan_growth_evaluation: {},
-            account_age_months: 0,
-            permissions: {
-                view_members: false,
-                loan_approval: false,
-                savings_approval: false,
-                withdrawal_approval: false,
-                registration_approval: false,
-                grant_rights: false,
-                customer_care: false,
-                view_reports: false,
-                profile_approval: false,
-                view_savings: false,
-                edit_members: false,
-                view_repayments: false,
-                view_transactions: false
-            },
-            registration_date: new Date().toISOString(),
-            created_at: new Date().toISOString()
-        };
-        
-        const result = await supabaseRequest('POST', 'members', newMember);
-        
+
         if (result.statusCode === 201) {
             sendWhatsAppAlert(
                 CONFIG.ADMIN_WHATSAPP,
@@ -3731,46 +3747,6 @@ async function forceRefreshAdminData(data) {
     }
 }
 
-async function debugPendingTransactions() {
-    try {
-        Logger.log('=== DEBUG: Checking pending transactions ===');
-        
-        const result = await supabaseRequest('GET', 
-            'transactions?select=*&status=eq.pending&order=created_at.desc');
-        
-        Logger.log('Total pending transactions found: ' + (result.data ? result.data.length : 0));
-        
-        if (result.data) {
-            result.data.forEach(t => {
-                Logger.log('Transaction ID: ' + t.id);
-                Logger.log('  Type: ' + t.type);
-                Logger.log('  Amount: ' + t.amount);
-                Logger.log('  Status: ' + t.status);
-                Logger.log('  Member ID: ' + t.member_id);
-                Logger.log('  Created: ' + t.created_at);
-                Logger.log('  M-Pesa: ' + t.mpesa_code);
-                Logger.log('---');
-            });
-        }
-        
-        const allResult = await supabaseRequest('GET', 'transactions?select=*&limit=10');
-        Logger.log('Total transactions in table (sample): ' + (allResult.data ? allResult.data.length : 0));
-        if (allResult.data) {
-            allResult.data.forEach(t => {
-                Logger.log('All Transaction: ' + t.id + ' | Type: ' + t.type + ' | Status: ' + t.status);
-            });
-        }
-        
-        return {
-            pending: result.data || [],
-            all: allResult.data || []
-        };
-    } catch (error) {
-        Logger.log('Debug error: ' + error.message);
-        return null;
-    }
-}
-
 async function activateMember(data) {
     try {
         const memberId = typeof data === 'object' ? data.memberId : data;
@@ -4549,6 +4525,7 @@ async function removeAdmin(data) {
 
 async function updateMemberByAdmin(data) {
     try {
+        await requirePermission(data && data.actorId, 'edit_members', ['super_admin', 'admin'], data && data.sessionToken);
         const updateData = {
             full_name: data.data.fullName,
             phone_number: data.data.phoneNumber,
@@ -4595,6 +4572,7 @@ async function adminAddExistingMember(data) {
         var joiningDate = String(data.joiningDate || '').trim();
         var email = String(data.email || '').trim();
         var openingSavings = numberValue(data.openingSavings);
+        var temporaryPassword = crypto.randomBytes(12).toString('base64url');
         if (!fullName || !idNumber || !phoneNumber || !joiningDate) throw new Error('Full name, National ID, phone number and original joining date are required for an existing member.');
         if (openingSavings < 0) throw new Error('Opening savings cannot be negative.');
         var join = new Date(joiningDate + 'T00:00:00');
@@ -4617,7 +4595,7 @@ async function adminAddExistingMember(data) {
             var now = new Date().toISOString();
             var memberRow = {
                 unique_member_id: uniqueId, full_name: fullName, id_number: idNumber, phone_number: phoneNumber,
-                email: email || null, password: hashPassword(idNumber), role: 'member', joining_date: join.toISOString(), registration_fee_paid: true,
+                email: email || null, password: hashPassword(temporaryPassword), role: 'member', joining_date: join.toISOString(), registration_fee_paid: true,
                 registration_fee_status: 'approved', registration_fee_amount: 0, is_active: true, biodata_completed: true,
                 biodata_locked: true, savings_balance: openingSavings, occupation: String(data.occupation || '').trim() || null,
                 address: String(data.address || '').trim() || null, next_of_kin: String(data.nextOfKin || '').trim() || null,
@@ -4635,8 +4613,17 @@ async function adminAddExistingMember(data) {
                 if (tx.statusCode !== 201) throw new Error('Member was created but opening savings transaction could not be recorded. Please review the account before adding another record.');
             }
             await writeAuditLog('ADD_EXISTING_MEMBER', actor.id, 'member', member.id, {}, memberRow, {joining_date: joiningDate, opening_savings: openingSavings, source:'pre_portal_sacco'});
-            if (data.sendWelcome !== false) sendWhatsAppAlert(phoneNumber, 'WELCOME TO SND BRIGHTLIFE CBO\nMember ID: ' + uniqueId + '\nLogin ID: ' + idNumber + '\nInitial password: ' + idNumber + '\nPlease change your password after first login.');
-            return {success:true, message:'Existing SACCO member added successfully.', memberId:uniqueId, loginId:idNumber};
+            if (data.sendWelcome !== false) {
+                sendWhatsAppAlert(phoneNumber, 'WELCOME TO SND BRIGHTLIFE CBO\nMember Number: ' + uniqueId + '\nLogin ID: ' + idNumber + '\nTemporary password: ' + temporaryPassword + '\nPlease change it after your first login.');
+            }
+            return {
+                success:true,
+                message:data.sendWelcome !== false
+                    ? 'Existing SACCO member added successfully. A temporary login credential has been sent to the member.'
+                    : 'Existing SACCO member added successfully. Welcome notification was not sent.',
+                memberId:uniqueId,
+                loginId:idNumber
+            };
         } finally {
             idLock.releaseLock();
         }
@@ -5031,147 +5018,6 @@ async function sendDailySummary() {
         return { success: true, message: 'Summary sent' };
     } catch (error) {
         return { success: false, message: error.message };
-    }
-}
-
-async function createAdminUser() {
-    try {
-        const checkResult = await supabaseRequest('GET', 'members?select=*&id_number=eq.SUPERADMIN001');
-        
-        const superAdminHash = 'bfcad60d018539a34637637a1d62f9517e7959f551ed6cf4b080ec94ab219183';
-        const adminHash = 'a36aef5a11c4073fbe60314fc9df530a9d5f986533594d1f5190742ff9e0e408';
-        
-        if (checkResult.statusCode === 200 && checkResult.data && checkResult.data.length > 0) {
-            Logger.log('Super admin already exists - updating password');
-            
-            const updateSuper = await supabaseRequest('PATCH', 'members?id_number=eq.SUPERADMIN001', {
-                password: superAdminHash,
-                updated_at: new Date().toISOString()
-            });
-            Logger.log('Super admin updated: ' + JSON.stringify(updateSuper));
-            
-            const updateAdmin = await supabaseRequest('PATCH', 'members?id_number=eq.ADMIN001', {
-                password: adminHash,
-                updated_at: new Date().toISOString()
-            });
-            Logger.log('Admin updated: ' + JSON.stringify(updateAdmin));
-            
-            return { 
-                success: true, 
-                message: 'Admin passwords updated successfully!',
-                superAdmin: { id_number: 'SUPERADMIN001', password: 'mOrisky07.super' },
-                admin: { id_number: 'ADMIN001', password: 'Admin@2026' }
-            };
-        }
-        
-        const superAdminData = {
-            unique_member_id: 'SUPER-ADMIN-001',
-            full_name: 'Super Administrator',
-            id_number: 'SUPERADMIN001',
-            phone_number: CONFIG.ADMIN_WHATSAPP || '+254111640106',
-            email: 'superadmin@brightlife.co.ke',
-            password: superAdminHash,
-            role: 'super_admin',
-            registration_fee_paid: true,
-            registration_fee_status: 'approved',
-            is_active: true,
-            biodata_completed: true,
-            biodata_locked: true,
-            savings_balance: 0,
-            profile_edit_status: 'approved',
-            loan_limit: 500000,
-            loan_growth_tier: 'platinum',
-            loan_growth_score: 100,
-            permissions: {
-                view_members: true,
-                loan_approval: true,
-                savings_approval: true,
-                withdrawal_approval: true,
-                registration_approval: true,
-                grant_rights: true,
-                customer_care: true,
-                view_reports: true,
-                profile_approval: true,
-                view_savings: true,
-                edit_members: true,
-                view_repayments: true,
-                view_transactions: true
-            },
-            registration_date: new Date().toISOString(),
-            created_at: new Date().toISOString()
-        };
-        
-        const superResult = await supabaseRequest('POST', 'members', superAdminData);
-        
-        if (superResult.statusCode !== 201) {
-            throw new Error('Failed to create super admin');
-        }
-        
-        const superIdResult = await supabaseRequest('GET', 'members?select=id&id_number=eq.SUPERADMIN001');
-        const superId = superIdResult.statusCode === 200 && superIdResult.data && superIdResult.data.length > 0 ? 
-                       superIdResult.data[0].id : null;
-        
-        const adminData = {
-            unique_member_id: 'ADMIN-001',
-            full_name: 'System Administrator',
-            id_number: 'ADMIN001',
-            phone_number: CONFIG.ADMIN_WHATSAPP || '+254111640106',
-            email: 'admin@brightlife.co.ke',
-            password: adminHash,
-            role: 'admin',
-            registration_fee_paid: true,
-            registration_fee_status: 'approved',
-            is_active: true,
-            biodata_completed: true,
-            biodata_locked: true,
-            savings_balance: 0,
-            profile_edit_status: 'approved',
-            loan_limit: 500000,
-            loan_growth_tier: 'platinum',
-            loan_growth_score: 100,
-            permissions: {
-                view_members: true,
-                loan_approval: true,
-                savings_approval: true,
-                withdrawal_approval: true,
-                registration_approval: true,
-                grant_rights: false,
-                customer_care: true,
-                view_reports: true,
-                profile_approval: true,
-                view_savings: true,
-                edit_members: true,
-                view_repayments: true,
-                view_transactions: true
-            },
-            created_by: superId,
-            registration_date: new Date().toISOString(),
-            created_at: new Date().toISOString()
-        };
-        
-        const adminResult = await supabaseRequest('POST', 'members', adminData);
-        Logger.log('Admin creation result: ' + JSON.stringify(adminResult));
-        
-        return { 
-            success: true, 
-            message: 'Super admin and admin created successfully!',
-            superAdmin: { id_number: 'SUPERADMIN001', password: 'mOrisky07.super' },
-            admin: { id_number: 'ADMIN001', password: 'Admin@2026' }
-        };
-    } catch (error) {
-        Logger.log('Error creating admin: ' + error.message);
-        return { success: false, message: error.message };
-    }
-}
-
-async function testMemberStatus(memberId) {
-    try {
-        const result = await supabaseRequest('GET', 'members?select=id,full_name,is_active,registration_fee_status,savings_balance,profile_edit_status,loan_limit,loan_growth_tier&id=eq.' + encodeURIComponent(memberId));
-        Logger.log('Member status: ' + JSON.stringify(result.data));
-        return result.data;
-    } catch (error) {
-        Logger.log('Error: ' + error.message);
-        return null;
     }
 }
 
@@ -5666,22 +5512,6 @@ async function sendWithdrawalAlert(memberData, amount, phone) {
     var htmlBody = generateSummaryTable('🏦 WITHDRAWAL REQUEST', 'Pending Approval', tableData);
     
     await sendResponsibleAdminNotification_(subject, htmlBody, { requiredPermissions: ['withdrawal_approval'] });
-}
-
-function testHashFunction() {
-    var testPasswords = ['admin123', 'mOrisky07.super', 'Admin@2026'];
-    var results = [];
-    
-    for (var i = 0; i < testPasswords.length; i++) {
-        var hash = hashPassword(testPasswords[i]);
-        results.push({
-            password: testPasswords[i],
-            hash: hash
-        });
-        Logger.log('Hash for "' + testPasswords[i] + '": ' + hash);
-    }
-    
-    return results;
 }
 
 async function getAllTransactionsForAdmin(data) {
@@ -6228,7 +6058,6 @@ const FUNCTIONS = {
   getLoanGrowthStatus: getLoanGrowthStatus,
   batchEvaluateLoanGrowth: batchEvaluateLoanGrowth,
   forceRefreshAdminData: forceRefreshAdminData,
-  debugPendingTransactions: debugPendingTransactions,
   activateMember: activateMember,
   deactivateMember: deactivateMember,
   grantRights: grantRights,
@@ -6266,8 +6095,6 @@ const FUNCTIONS = {
   getLoanById: getLoanById,
   getAllMemberTransactions: getAllMemberTransactions,
   sendDailySummary: sendDailySummary,
-  createAdminUser: createAdminUser,
-  testMemberStatus: testMemberStatus,
   generateSummaryTable: generateSummaryTable,
   sendDailySummaryEmail: sendDailySummaryEmail,
   sendWeeklySummaryEmail: sendWeeklySummaryEmail,
@@ -6278,7 +6105,6 @@ const FUNCTIONS = {
   sendSavingsApprovedEmail: sendSavingsApprovedEmail,
   sendRegistrationAlert: sendRegistrationAlert,
   sendWithdrawalAlert: sendWithdrawalAlert,
-  testHashFunction: testHashFunction,
   getAllTransactionsForAdmin: getAllTransactionsForAdmin,
   getAllRepaymentsForViewer: getAllRepaymentsForViewer,
   getTransactionSummaryForAdmin: getTransactionSummaryForAdmin,
@@ -6301,6 +6127,75 @@ const FUNCTIONS = {
 };
 
 const PUBLIC_FUNCTIONS = new Set(['healthCheck','loginMember','registerMember','requestPasswordReset','resetPasswordWithOtp','logoutMember','getPublishedSiteContent']);
+const HTTP_API_FUNCTIONS = new Set([
+  'activateLoanGrowthMethod',
+  'activateMember',
+  'adminAddExistingMember',
+  'applyForLoan',
+  'approveLoan',
+  'approveProfileEdit',
+  'approveRegistrationFee',
+  'approveSavings',
+  'approveWithdrawal',
+  'assignAdmin',
+  'batchEvaluateLoanGrowth',
+  'checkActiveLoanGrowthMethod',
+  'checkMpesaCode',
+  'deactivateMember',
+  'evaluateLoanGrowth',
+  'forceRefreshAdminData',
+  'generateReportPdf',
+  'getAccountAccess',
+  'getAdminDashboard',
+  'getAllCustomerMessages',
+  'getAllMemberTransactions',
+  'getAllMembers',
+  'getAllRepaymentsForViewer',
+  'getAllTransactionsForAdmin',
+  'getDashboardStats',
+  'getExecutiveDashboard',
+  'getGuarantorRequests',
+  'getKcbPaymentStatus',
+  'getLoanGrowthSettings',
+  'getLoanGrowthStatus',
+  'getManagementReportData',
+  'getMemberMessages',
+  'getMemberProfile',
+  'getPublishedSiteContent',
+  'getSettings',
+  'getSiteContentAdmin',
+  'getUnreadMessages',
+  'healthCheck',
+  'importDataFile',
+  'initiateKcbMpesaPayment',
+  'loginMember',
+  'logoutMember',
+  'markMessagesAsRead',
+  'processSavings',
+  'registerMember',
+  'rejectLoan',
+  'rejectProfileEdit',
+  'rejectRegistrationFee',
+  'rejectSavings',
+  'rejectWithdrawal',
+  'removeAdmin',
+  'repayLoan',
+  'replyToMember',
+  'requestPasswordReset',
+  'requestWithdrawal',
+  'resetPassword',
+  'resetPasswordWithOtp',
+  'respondToGuarantorRequest',
+  'saveSiteContent',
+  'sendCustomerCareMessage',
+  'synchronizeMemberAccountAge',
+  'togglePermission',
+  'updateBiodata',
+  'updateCustomerCareNumber',
+  'updateLoanGrowthSettings',
+  'updateMemberByAdmin',
+  'updateSettings'
+]);
 
 async function healthCheck(){
   const r=await supabaseRequest('GET','members?select=id&limit=1');
@@ -6314,13 +6209,29 @@ export async function runFunction(functionName, params={}) {
   return await fn(params||{});
 }
 
+function getAllowedOrigin_(req) {
+  const configured = String(process.env.APP_ORIGIN || 'https://brightlifesnd.com').trim().replace(/\/$/, '');
+  const origin = String(req?.headers?.origin || '').trim().replace(/\/$/, '');
+  const development = new Set(['http://localhost:3000','http://localhost:5173','http://127.0.0.1:3000','http://127.0.0.1:5173']);
+  if (origin === configured || development.has(origin)) return origin;
+  return configured;
+}
+
 async function handler(req,res){
-  if(req.method==='OPTIONS'){res.setHeader('Access-Control-Allow-Origin','*');res.setHeader('Access-Control-Allow-Methods','POST, OPTIONS');res.setHeader('Access-Control-Allow-Headers','Content-Type, Authorization');return res.status(204).end();}
+  const allowedOrigin = getAllowedOrigin_(req);
+  res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
+  res.setHeader('Vary', 'Origin');
+  if(req.method==='OPTIONS'){
+    res.setHeader('Access-Control-Allow-Methods','POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers','Content-Type, Authorization');
+    return res.status(204).end();
+  }
   if(req.method!=='POST')return res.status(405).json({success:false,message:'Method not allowed.'});
   try{
     const body=typeof req.body==='string'?JSON.parse(req.body):req.body||{};
     const functionName=String(body.functionName||'').trim(); const params=body.params&&typeof body.params==='object'?body.params:{};
     if(!functionName)return res.status(400).json({success:false,message:'No server function specified.'});
+    if(!HTTP_API_FUNCTIONS.has(functionName))return res.status(404).json({success:false,message:'This server function is not available through the public API.'});
     const fn=FUNCTIONS[functionName]; if(typeof fn!=='function')return res.status(404).json({success:false,message:'Unknown Brightlife server function: '+functionName});
     if(!PUBLIC_FUNCTIONS.has(functionName)){
       const actorId=params.actorId||params.memberId;
