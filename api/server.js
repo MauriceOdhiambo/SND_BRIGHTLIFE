@@ -582,6 +582,15 @@ async function sendResponsibleAdminNotification_(subject, htmlBody, options) {
   );
 }
 
+function escapeHtmlServer_(value) {
+    return String(value == null ? '' : value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/\"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 function numberValue(value) {
     var n = Number(value);
     return isFinite(n) ? n : 0;
@@ -1506,20 +1515,25 @@ async function getGuarantorRequests(data) {
 
         var memberResult = await supabaseRequest(
             'GET',
-            'members?select=id,id_number,unique_member_id,full_name,phone_number&id=eq.' +
+            'members?select=id,id_number,unique_member_id,full_name,phone_number,email&id=eq.' +
             encodeURIComponent(memberId) + '&limit=1'
         );
         if (memberResult.statusCode !== 200 || !memberResult.data || !memberResult.data.length) {
             throw new Error('Member not found.');
         }
 
-        var idNumber = normalizeIdNumber_(memberResult.data[0].id_number);
+        var memberRecord = memberResult.data[0];
+        var memberRefs = uniqueStrings([memberRecord.unique_member_id, memberRecord.id_number]);
+        if (!memberRefs.length) throw new Error('Member identification is incomplete.');
+        var guarantorFilters = [];
+        memberRefs.forEach(function(ref){
+            guarantorFilters.push('guarantor1_id.eq.' + encodeURIComponent(ref));
+            guarantorFilters.push('guarantor2_id.eq.' + encodeURIComponent(ref));
+        });
 
         var result = await supabaseRequest(
             'GET',
-            'loans?select=*&or=(' +
-                'guarantor1_id.eq.' + encodeURIComponent(idNumber) +
-                ',guarantor2_id.eq.' + encodeURIComponent(idNumber) +
+            'loans?select=*&or=(' + guarantorFilters.join(',') +
             ')&order=created_at.desc&limit=200'
         );
 
@@ -1551,8 +1565,8 @@ async function getGuarantorRequests(data) {
 
         requests = requests.map(function(x) {
             var applicant = applicantMap[String(x.member_id)] || {};
-            var mineIsFirst =
-                String(x.guarantor1_id || '').trim().toUpperCase() === idNumber.toUpperCase();
+            var loanGuarantor1 = String(x.guarantor1_id || '').trim().toUpperCase();
+            var mineIsFirst = memberRefs.map(function(ref){ return String(ref).trim().toUpperCase(); }).indexOf(loanGuarantor1) >= 0;
 
             var myStatus = mineIsFirst ?
                 String(x.guarantor1_status || 'pending') :
@@ -1567,6 +1581,12 @@ async function getGuarantorRequests(data) {
                 all_guarantors_accepted:
                     String(x.guarantor1_status || 'pending') === 'accepted' &&
                     String(x.guarantor2_status || 'pending') === 'accepted',
+                both_guarantors_responded:
+                    String(x.guarantor1_status || 'pending') !== 'pending' &&
+                    String(x.guarantor2_status || 'pending') !== 'pending',
+                any_guarantor_rejected:
+                    String(x.guarantor1_status || 'pending') === 'rejected' ||
+                    String(x.guarantor2_status || 'pending') === 'rejected',
                 is_history: String(x.status || 'pending') !== 'pending'
             });
         });
@@ -1655,6 +1675,27 @@ async function respondToGuarantorRequest(data) {
             { [field]: decision },
             { reason: reason }
         );
+
+        // Once both guarantors have responded, notify the responsible administrators
+        // that the loan is ready for the final approval/rejection decision.
+        try {
+            var latestLoanResult = await supabaseRequest('GET', 'loans?select=member_id,amount,guarantor1_status,guarantor2_status&id=eq.' + encodeURIComponent(loanId) + '&limit=1');
+            if (latestLoanResult.statusCode === 200 && latestLoanResult.data && latestLoanResult.data.length) {
+                var latestLoan = latestLoanResult.data[0];
+                var g1Done = String(latestLoan.guarantor1_status || 'pending') !== 'pending';
+                var g2Done = String(latestLoan.guarantor2_status || 'pending') !== 'pending';
+                if (g1Done && g2Done) {
+                    await notifyAdmins('🔐 LOAN READY FOR FINAL DECISION\n' +
+                        'Loan ID: ' + loanId + '\n' +
+                        'Amount: KES ' + numberValue(latestLoan.amount).toFixed(2) + '\n' +
+                        'Guarantor 1: ' + String(latestLoan.guarantor1_status).toUpperCase() + '\n' +
+                        'Guarantor 2: ' + String(latestLoan.guarantor2_status).toUpperCase() + '\n' +
+                        'The administrator may now make the final loan decision.');
+                }
+            }
+        } catch (notifyError) {
+            Logger.log('Final guarantor decision notification failed: ' + notifyError.message);
+        }
 
         return {
             success: true,
@@ -2621,16 +2662,16 @@ async function applyForLoan(data) {
             throw new Error('Maximum loan is KES ' + effectiveLimit.toFixed(2) + '. Active method: ' + loanCalculation.activeMethod.toUpperCase() + '.');
         }
 
-        var guarantor1 = String(loanData.guarantor1Id || '').trim();
-        var guarantor2 = String(loanData.guarantor2Id || '').trim();
+        var guarantor1 = String(loanData.guarantor1Id || loanData.guarantor1IdNumber || '').trim();
+        var guarantor2 = String(loanData.guarantor2Id || loanData.guarantor2IdNumber || '').trim();
         if (!guarantor1 || !guarantor2) throw new Error('At least 2 active member guarantors are required.');
         if (guarantor1 === guarantor2) throw new Error('Choose two different guarantors.');
 
-        // Confirm both guarantors are active members. The current SQL schema does not contain
-        // guarantor acceptance fields, so selection is stored for admin verification.
+        // Confirm both guarantors are active members. Their responses are recorded on the loan
+        // and both responses are required before the administrator can make the final decision.
         var gResults = await supabaseFetchAll([
-            'members?select=id,unique_member_id,full_name,is_active&id=eq.' + encodeURIComponent(guarantor1),
-            'members?select=id,unique_member_id,full_name,is_active&id=eq.' + encodeURIComponent(guarantor2)
+            'members?select=id,unique_member_id,id_number,full_name,email,phone_number,is_active&or=(unique_member_id.eq.' + encodeURIComponent(guarantor1) + ',id_number.eq.' + encodeURIComponent(guarantor1) + ')&limit=1',
+            'members?select=id,unique_member_id,id_number,full_name,email,phone_number,is_active&or=(unique_member_id.eq.' + encodeURIComponent(guarantor2) + ',id_number.eq.' + encodeURIComponent(guarantor2) + ')&limit=1'
         ]);
         if (gResults[0].statusCode !== 200 || !gResults[0].data || !gResults[0].data.length || !gResults[0].data[0].is_active) throw new Error('Guarantor 1 must be an active member.');
         if (gResults[1].statusCode !== 200 || !gResults[1].data || !gResults[1].data.length || !gResults[1].data[0].is_active) throw new Error('Guarantor 2 must be an active member.');
@@ -2658,6 +2699,29 @@ async function applyForLoan(data) {
         });
         if (loanResult.statusCode !== 201) throw new Error('Failed to submit loan application');
 
+        var createdLoan = loanResult.data && loanResult.data[0] ? loanResult.data[0] : {};
+
+        // Notify both selected guarantors immediately so the request is actionable.
+        [gResults[0].data[0], gResults[1].data[0]].forEach(function(guarantor, index){
+            if (!guarantor) return;
+            var position = index === 0 ? 'Guarantor 1' : 'Guarantor 2';
+            var subject = 'SND Brightlife CBO — Loan Guarantee Request';
+            var body = '<p>You have been selected as ' + position + ' for a loan application by <strong>' + escapeHtmlServer_(member.full_name) + '</strong>.</p>' +
+                '<p><strong>Loan amount:</strong> KES ' + amount.toFixed(2) + '<br>' +
+                '<strong>Repayment period:</strong> ' + days + ' days<br>' +
+                '<strong>Total repayment:</strong> KES ' + totalRepayment.toFixed(2) + '</p>' +
+                '<p>Please sign in to your SND Brightlife member workspace to review and accept or decline the guarantee request.</p>';
+            sendMemberNotification_(guarantor, subject, body, {returnDetails:false});
+            if (guarantor.phone_number) {
+                sendWhatsAppAlert(guarantor.phone_number, '🔔 GUARANTOR REQUEST\n' +
+                    member.full_name + ' has selected you as ' + position + '.\n' +
+                    'Loan: KES ' + amount.toFixed(2) + '\n' +
+                    'Repayment: ' + days + ' days\n' +
+                    'Total: KES ' + totalRepayment.toFixed(2) + '\n\n' +
+                    'Log in to the SND Brightlife member workspace to respond.');
+            }
+        });
+
         await notifyAdmins('💳 LOAN APPLICATION\n' +
             'Member: ' + member.full_name + '\n' +
             'ID: ' + member.unique_member_id + '\n' +
@@ -2665,9 +2729,8 @@ async function applyForLoan(data) {
             'Period: ' + days + ' days\n' +
             'Interest: ' + (interestRate * 100) + '%\n' +
             'Total Repayment: KES ' + totalRepayment.toFixed(2) + '\n' +
-            'Maximum by savings: KES ' + hardCap.toFixed(2));
-
-        var createdLoan = loanResult.data && loanResult.data[0] ? loanResult.data[0] : {};
+            'Maximum by savings: KES ' + hardCap.toFixed(2) + '\n' +
+            'Status: Awaiting both guarantor responses');
         return {
             success: true,
             message: 'Loan application submitted successfully! Awaiting admin approval.',
@@ -2694,6 +2757,14 @@ async function approveLoan(data) {
         
         const loan = result.data[0];
         if (loan.status !== 'pending') throw new Error('This loan is no longer pending.');
+        var guarantor1Status = String(loan.guarantor1_status || 'pending').toLowerCase();
+        var guarantor2Status = String(loan.guarantor2_status || 'pending').toLowerCase();
+        if (guarantor1Status === 'pending' || guarantor2Status === 'pending') {
+            throw new Error('Final approval is locked until both guarantors have responded.');
+        }
+        if (guarantor1Status !== 'accepted' || guarantor2Status !== 'accepted') {
+            throw new Error('This loan cannot be approved because at least one guarantor declined the guarantee.');
+        }
         
         const memberResult = await supabaseRequest('GET', 'members?select=id,full_name,unique_member_id,phone_number&id=eq.' + encodeURIComponent(loan.member_id));
         const member = memberResult.statusCode === 200 && memberResult.data && memberResult.data.length > 0 ? memberResult.data[0] : {};
@@ -2729,6 +2800,23 @@ async function approveLoan(data) {
                 'Due Date: ' + formatKenyaDate_(new Date(loan.repayment_due_date))
             );
         }
+
+        // Keep both guarantors informed when the administrator completes the final decision.
+        try {
+            var approvedGuarantorRefs = uniqueStrings([loan.guarantor1_id, loan.guarantor2_id]);
+            var approvedGuarantors = await supabaseFetchAll(approvedGuarantorRefs.map(function(ref){
+                return 'members?select=id,unique_member_id,id_number,full_name,email,phone_number&or=(unique_member_id.eq.' + encodeURIComponent(ref) + ',id_number.eq.' + encodeURIComponent(ref) + ')&limit=1';
+            }));
+            approvedGuarantors.forEach(function(gr){
+                if (!gr || gr.statusCode !== 200 || !gr.data || !gr.data.length) return;
+                var guarantor = gr.data[0];
+                sendMemberNotification_(guarantor, 'SND Brightlife CBO — Loan Approved',
+                    '<p>The administrator has approved and disbursed the loan you guaranteed.</p><p><strong>Amount:</strong> KES ' + numberValue(loan.amount).toFixed(2) + '<br><strong>Total repayment:</strong> KES ' + numberValue(loan.total_repayment).toFixed(2) + '<br><strong>Due date:</strong> ' + escapeHtmlServer_(formatKenyaDate_(new Date(loan.repayment_due_date))) + '</p><p>You can track repayment progress from your Guarantors menu.</p>', {returnDetails:false});
+                if (guarantor.phone_number) sendWhatsAppAlert(guarantor.phone_number, '✅ LOAN GUARANTEE ACTIVE\nThe loan you guaranteed has been approved and disbursed.\nAmount: KES ' + numberValue(loan.amount).toFixed(2) + '\nTotal repayment: KES ' + numberValue(loan.total_repayment).toFixed(2) + '\nTrack repayment progress in your SND Brightlife Guarantors menu.');
+            });
+        } catch (notifyError) {
+            Logger.log('Guarantor approval notification failed: ' + notifyError.message);
+        }
         
         return { success: true, message: 'Loan approved and disbursed' };
     } catch (error) {
@@ -2741,9 +2829,17 @@ async function rejectLoan(data) {
         var loanId = typeof data === 'object' ? data.loanId : data;
         var actorId = typeof data === 'object' ? data.actorId : null;
         await requirePermission(actorId, 'loan_approval', undefined, data && data.sessionToken);
-        const endpoint = 'loans?id=eq.' + encodeURIComponent(loanId);
-        await supabaseRequest('PATCH', endpoint, { status: 'rejected' });
-        return { success: true, message: 'Loan rejected' };
+        const loanResult = await supabaseRequest('GET', 'loans?select=id,status,guarantor1_status,guarantor2_status&id=eq.' + encodeURIComponent(loanId) + '&limit=1');
+        if (loanResult.statusCode !== 200 || !loanResult.data || !loanResult.data.length) throw new Error('Loan not found');
+        const loan = loanResult.data[0];
+        if (String(loan.status) !== 'pending') throw new Error('This loan is no longer pending.');
+        if (String(loan.guarantor1_status || 'pending') === 'pending' || String(loan.guarantor2_status || 'pending') === 'pending') {
+            throw new Error('Final decision is locked until both guarantors have responded.');
+        }
+        const endpoint = 'loans?id=eq.' + encodeURIComponent(loanId) + '&status=eq.pending';
+        const update = await supabaseRequest('PATCH', endpoint, { status: 'rejected', updated_at: new Date().toISOString() });
+        if (update.statusCode !== 200) throw new Error('Loan could not be rejected.');
+        return { success: true, message: 'Loan rejected after final guarantor review.' };
     } catch (error) {
         return { success: false, message: error.message };
     }
@@ -2817,6 +2913,30 @@ async function repayLoan(data) {
             created_at: nowIso
         });
         if (trans.statusCode !== 201) Logger.log('Warning: repayment transaction ledger insert failed: ' + JSON.stringify(trans));
+
+        // Keep both guarantors informed of repayment progress after every recorded payment.
+        try {
+            var guarantorRefs = uniqueStrings([loan.guarantor1_id, loan.guarantor2_id]);
+            if (guarantorRefs.length) {
+                var gNotify = await supabaseFetchAll(guarantorRefs.map(function(ref){
+                    return 'members?select=id,unique_member_id,id_number,full_name,email,phone_number&or=(unique_member_id.eq.' + encodeURIComponent(ref) + ',id_number.eq.' + encodeURIComponent(ref) + ')&limit=1';
+                }));
+                var progressMessage = '💰 LOAN REPAYMENT UPDATE\n' +
+                    'Borrower loan has received a repayment of KES ' + amount.toFixed(2) + '.\n' +
+                    'Paid so far: KES ' + newAmountPaid.toFixed(2) + ' of KES ' + totalRepayment.toFixed(2) + '.\n' +
+                    'Remaining: KES ' + Math.max(0, totalRepayment - newAmountPaid).toFixed(2) + '\n' +
+                    'Status: ' + (isFullyPaid ? 'Fully paid' : 'Active');
+                gNotify.forEach(function(gr){
+                    if (!gr || gr.statusCode !== 200 || !gr.data || !gr.data.length) return;
+                    var guarantor = gr.data[0];
+                    sendMemberNotification_(guarantor, 'SND Brightlife CBO — Loan Repayment Update',
+                        '<p>A repayment has been recorded on the loan you guaranteed.</p><p><strong>Paid so far:</strong> KES ' + newAmountPaid.toFixed(2) + '<br><strong>Total repayment:</strong> KES ' + totalRepayment.toFixed(2) + '<br><strong>Remaining:</strong> KES ' + Math.max(0, totalRepayment - newAmountPaid).toFixed(2) + '<br><strong>Status:</strong> ' + (isFullyPaid ? 'Fully paid' : 'Active') + '</p>', {returnDetails:false});
+                    if (guarantor.phone_number) sendWhatsAppAlert(guarantor.phone_number, progressMessage);
+                });
+            }
+        } catch (notifyError) {
+            Logger.log('Guarantor repayment notification failed: ' + notifyError.message);
+        }
 
         return {
             success: true,
