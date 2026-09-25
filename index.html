@@ -5235,12 +5235,48 @@ window.BRIGHTLIFE_BUILD = 'BRIGHTLIFE-PROFESSIONAL-PUBLIC-PORTAL-2026-09-23';
             if (overlay) overlay.classList.toggle('show', willOpen);
         }
         window.addEventListener('resize', syncWorkspaceLayout);
+        function ensureAuthenticatedWorkspaceNavigation() {
+            var sidebar = document.getElementById('sidebar');
+            var main = document.getElementById('mainWrapper');
+            var dashboard = document.getElementById('dashboard');
+            var secureSection = document.getElementById('secureMemberSection');
+            var toggleBtn = document.getElementById('mobileMenuToggle');
+            if (!sidebar || !main || !dashboard || !getCanonicalMemberId()) return false;
+            document.body.classList.add('workspace-active');
+            if (secureSection) secureSection.style.display = 'block';
+            sidebar.classList.add('visible');
+            sidebar.removeAttribute('aria-hidden');
+            sidebar.style.setProperty('display','flex','important');
+            sidebar.style.setProperty('visibility','visible','important');
+            sidebar.style.setProperty('opacity','1','important');
+            sidebar.style.setProperty('pointer-events','auto','important');
+            var mobile = workspaceIsMobile();
+            if (mobile) {
+                main.classList.remove('with-sidebar','expanded');
+                main.style.removeProperty('margin-left');
+                main.style.removeProperty('width');
+                main.style.removeProperty('max-width');
+                if (toggleBtn) toggleBtn.classList.remove('hidden');
+                if (!sidebar.classList.contains('open')) sidebar.style.setProperty('transform','translateX(-105%)','important');
+            } else {
+                sidebar.classList.remove('open');
+                sidebar.style.setProperty('transform','translateX(0)','important');
+                main.classList.add('with-sidebar');
+                main.style.setProperty('margin-left','272px','important');
+                main.style.setProperty('width','calc(100% - 272px)','important');
+                main.style.setProperty('max-width','calc(100% - 272px)','important');
+                if (toggleBtn) toggleBtn.classList.add('hidden');
+            }
+            return true;
+        }
+
         function showSidebar() {
             const sidebar = document.getElementById('sidebar');
             if (!sidebar) return;
             sidebar.classList.add('visible');
             document.body.classList.add('workspace-active');
             syncWorkspaceLayout();
+            ensureAuthenticatedWorkspaceNavigation();
         }
         function hideSidebar() {
             const sidebar = document.getElementById('sidebar');
@@ -5881,15 +5917,16 @@ function updateUserInfo(member) {
             var publicSidebar=document.getElementById('publicSidebarSection'); if(publicSidebar) publicSidebar.style.display='none';
             var secureSection=document.getElementById('secureMemberSection'); if(secureSection) secureSection.style.display='block';
             ['nav-project-water-secure','nav-project-poultry-secure','nav-trainings-secure'].forEach(function(id){ var item=document.getElementById(id); if(item) item.style.display='flex'; });
+            // Show and size the authenticated workspace sidebar immediately after login.
+            // The page-reload/session-restore path already calls showSidebar(); the direct
+            // login path must do the same or the sidebar area stays blank until Ctrl+F5.
+            if (typeof showSidebar === 'function') showSidebar();
+            if (typeof ensureAuthenticatedWorkspaceNavigation === 'function') ensureAuthenticatedWorkspaceNavigation();
             var adminSection=document.getElementById('adminSection');
             var role=String((member&&member.role)||'').toLowerCase();
             if(adminSection) adminSection.style.display=(role==='admin'||role==='super_admin'||role==='treasurer'||role==='customer_care'||role==='profile_approver')?'block':'none';
             updateUserInfo(member);
             updateMemberTopbar(member);
-            // Reveal and size the authenticated workspace navigation immediately.
-            // Do not wait for loadDashboard() or a later page reload: the sidebar
-            // must be present on the first successful sign-in as well as on refresh.
-            showSidebar();
         }
         async function loginUser(event) {
             event.preventDefault();
@@ -5940,7 +5977,13 @@ function updateUserInfo(member) {
                     } catch (e) {}
                     updateUserInfo(result.member);
                     showAuthenticatedShell(result.member);
-                    loadDashboard(true).catch(function(e){ console.error('Dashboard load after login:',e); });
+                    ensureAuthenticatedWorkspaceNavigation();
+                    loadDashboard(true).then(function(){
+                        ensureAuthenticatedWorkspaceNavigation();
+                    }).catch(function(e){
+                        console.error('Dashboard load after login:',e);
+                        ensureAuthenticatedWorkspaceNavigation();
+                    });
                     setTimeout(function(){
                         callServer('synchronizeMemberAccountAge',{memberId:result.member.idNumber,actorId:result.member.id},{force:true}).catch(function(){});
                     },50);
@@ -6737,7 +6780,16 @@ if(!document.getElementById('brightlifeProjectsPublicHeaderStyles')){var st=docu
             }
             };
             dashboardLoadPromise=run();
-            try { return await dashboardLoadPromise; } finally { dashboardLoadPromise=null; }
+            try {
+                return await dashboardLoadPromise;
+            } finally {
+                dashboardLoadPromise=null;
+                if (getCanonicalMemberId() && typeof ensureAuthenticatedWorkspaceNavigation === 'function') {
+                    ensureAuthenticatedWorkspaceNavigation();
+                    requestAnimationFrame(function(){ ensureAuthenticatedWorkspaceNavigation(); });
+                    setTimeout(function(){ ensureAuthenticatedWorkspaceNavigation(); }, 120);
+                }
+            }
         }
         function renderLoanGrowthStatus(status) {
             const tierEmojis = {
@@ -11248,6 +11300,17 @@ html+=`<div class="section-card" id="reportFilters"><div class="section-title"><
         }
         window.addEventListener('error', function(e) { console.error('Brightlife runtime error:', e.error || e.message); });
         window.addEventListener('unhandledrejection', function(e) { console.error('Brightlife async error:', e.reason); });
+
+        window.addEventListener('pageshow', function() {
+            if (getCanonicalMemberId() && typeof ensureAuthenticatedWorkspaceNavigation === 'function') {
+                setTimeout(function(){ ensureAuthenticatedWorkspaceNavigation(); }, 0);
+                setTimeout(function(){ ensureAuthenticatedWorkspaceNavigation(); }, 150);
+            }
+        });
+
+        document.addEventListener('visibilitychange', function() {
+            if (!document.hidden && getCanonicalMemberId() && typeof ensureAuthenticatedWorkspaceNavigation === 'function') ensureAuthenticatedWorkspaceNavigation();
+        });
 
         document.addEventListener('DOMContentLoaded', function() {
             const memberId = getCanonicalMemberId();
