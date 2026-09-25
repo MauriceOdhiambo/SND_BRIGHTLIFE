@@ -1556,8 +1556,9 @@ async function getGuarantorRequests(data) {
         });
 
         if (endpoints.length) {
-            await supabaseFetchAll(endpoints).forEach(function(r) {
-                if (r.statusCode === 200 && r.data && r.data.length) {
+            var applicantResults = await supabaseFetchAll(endpoints);
+            (Array.isArray(applicantResults) ? applicantResults : []).forEach(function(r) {
+                if (r && r.statusCode === 200 && Array.isArray(r.data) && r.data.length) {
                     applicantMap[String(r.data[0].id)] = r.data[0];
                 }
             });
@@ -1611,13 +1612,18 @@ async function respondToGuarantorRequest(data) {
 
         var actorResult = await supabaseRequest(
             'GET',
-            'members?select=id,id_number,full_name&id=eq.' +
+            'members?select=id,id_number,unique_member_id,full_name&id=eq.' +
                 encodeURIComponent(memberId) + '&limit=1'
         );
         if (actorResult.statusCode !== 200 || !actorResult.data || !actorResult.data.length) {
             throw new Error('Guarantor member not found.');
         }
 
+        var guarantorMemberRefs = uniqueStrings([
+            actorResult.data[0].unique_member_id,
+            actorResult.data[0].id_number
+        ]).map(function(v){ return String(v).trim().toUpperCase(); });
+        if (!guarantorMemberRefs.length) throw new Error('Guarantor member identification is incomplete.');
         var idNumber = normalizeIdNumber_(actorResult.data[0].id_number);
 
         var loanResult = await supabaseRequest(
@@ -1634,10 +1640,12 @@ async function respondToGuarantorRequest(data) {
         }
 
         var field, timeField;
-        if (String(loan.guarantor1_id || '').trim().toUpperCase() === idNumber.toUpperCase()) {
+        var loanGuarantor1 = String(loan.guarantor1_id || '').trim().toUpperCase();
+        var loanGuarantor2 = String(loan.guarantor2_id || '').trim().toUpperCase();
+        if (guarantorMemberRefs.indexOf(loanGuarantor1) >= 0) {
             field = 'guarantor1_status';
             timeField = 'guarantor1_responded_at';
-        } else if (String(loan.guarantor2_id || '').trim().toUpperCase() === idNumber.toUpperCase()) {
+        } else if (guarantorMemberRefs.indexOf(loanGuarantor2) >= 0) {
             field = 'guarantor2_status';
             timeField = 'guarantor2_responded_at';
         } else {
