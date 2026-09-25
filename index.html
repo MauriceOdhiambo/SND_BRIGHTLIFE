@@ -4849,7 +4849,7 @@ body.workspace-active{overflow-x:hidden!important;background:#f5f7fb!important;}
                     <div class="hierarchy-children">
                         <button class="nav-item secure-subnav" onclick="navigateTo('savings')" id="nav-savings"><i class="fas fa-piggy-bank"></i><span class="nav-text">Savings</span></button>
                         <button class="nav-item secure-subnav" onclick="navigateTo('loanmanagement')" id="nav-loanmanagement"><i class="fas fa-hand-holding-usd"></i><span class="nav-text">Loan Management</span></button>
-                        <button class="nav-item secure-subnav" onclick="navigateTo('guarantors')" id="nav-guarantors" style="display:none;"><i class="fas fa-user-shield"></i><span class="nav-text">Guarantors</span><span class="badge-count" id="guarantorBadge" style="display:none;">0</span></button>
+                        <button class="nav-item secure-subnav" onclick="navigateTo('guarantors')" id="nav-guarantors"><i class="fas fa-user-shield"></i><span class="nav-text">Guarantors</span><span class="badge-count" id="guarantorBadge" style="display:none;">0</span></button>
                         <button class="nav-item secure-subnav" onclick="navigateTo('repayments')" id="nav-repayments" style="display:none;"><i class="fas fa-history"></i><span class="nav-text">Repayments</span></button>
                         <button class="nav-item secure-subnav" onclick="navigateTo('transactions')" id="nav-transactions"><i class="fas fa-exchange-alt"></i><span class="nav-text">My Transactions</span></button>
                         <button class="nav-item secure-subnav" onclick="navigateTo('reports')" id="nav-reports"><i class="fas fa-file-lines"></i><span class="nav-text">My Statement</span></button>
@@ -5787,7 +5787,7 @@ function updateUserInfo(member) {
                 setElementDisplaySafe('nav-admin-reports', 'flex');
                 setElementDisplaySafe('nav-executive', (isAdmin || permissions.view_reports) ? 'flex' : 'none');
                 setElementDisplaySafe('nav-admin-repayments', (isAdmin || permissions.view_repayments) ? 'flex' : 'none');
-                setElementDisplaySafe('nav-guarantors', 'none');
+                setElementDisplaySafe('nav-guarantors', (member.role === 'member' && accountActive) ? 'flex' : 'none');
                 if (!isAdmin && member.role === 'member' && accountActive) loadGuarantorRequests();
                 setElementDisplaySafe('nav-chat', (isAdmin || permissions.customer_care) ? 'flex' : 'none');
                 setElementDisplaySafe('nav-alltransactions', (isAdmin || permissions.view_transactions) ? 'flex' : 'none');
@@ -6726,7 +6726,7 @@ if(!document.getElementById('brightlifeProjectsPublicHeaderStyles')){var st=docu
                         </div>
                     `;
                     setElementDisplaySafe('nav-admin-repayments', (hasTakenLoan || activeLoan) ? 'flex' : 'none');
-                    setElementDisplaySafe('nav-guarantors', 'none');
+                    setElementDisplaySafe('nav-guarantors', (role === 'member' && isActive) ? 'flex' : 'none');
                     loadGuarantorRequests();
                 }
                 if (role === 'member' && isActive && transactions.length > 0) {
@@ -8200,7 +8200,7 @@ if(!document.getElementById('brightlifeProjectsPublicHeaderStyles')){var st=docu
                 const result = await callServer('applyForLoan', {
                     memberId,
                     actorId: memberId,
-                    loanData: { amount, repaymentDays, guarantor1IdNumber, guarantor2IdNumber }
+                    loanData: { amount, repaymentDays, guarantor1Id: guarantor1IdNumber, guarantor2Id: guarantor2IdNumber }
                 });
                 if (result.success) {
                     showToast(result.message, 'success');
@@ -8855,8 +8855,9 @@ if(!document.getElementById('brightlifeProjectsPublicHeaderStyles')){var st=docu
                                         </div>
                                     </div>
                                     <div class="actions">
-                                        ${String(l.guarantor1_status||'pending')==='accepted' && String(l.guarantor2_status||'pending')==='accepted' ? '<button class="approve" onclick="approveLoan(\''+l.id+'\')"><i class="fas fa-check"></i> Approve & Disburse</button>' : '<span class="type-badge pending"><i class="fas fa-hourglass-half"></i> Awaiting both guarantors</span>'}
-                                        <button class="reject" onclick="rejectLoan('${l.id}')"><i class="fas fa-times"></i> Reject</button>
+                                        ${(String(l.guarantor1_status||'pending')!=='pending' && String(l.guarantor2_status||'pending')!=='pending') ? (String(l.guarantor1_status||'pending')==='accepted' && String(l.guarantor2_status||'pending')==='accepted' ? '<button class="approve" onclick="approveLoan(\''+l.id+'\')"><i class="fas fa-check"></i> Final Approve & Disburse</button>' : '<span class="type-badge rejected"><i class="fas fa-circle-xmark"></i> Guarantor declined — final rejection</span>') : '<span class="type-badge pending"><i class="fas fa-hourglass-half"></i> Awaiting both guarantor responses</span>'}
+                                        <div style="width:100%;font-size:11px;color:var(--gray-500);margin-top:6px;">Guarantor 1: <strong>${String(l.guarantor1_status||'pending').toUpperCase()}</strong> · Guarantor 2: <strong>${String(l.guarantor2_status||'pending').toUpperCase()}</strong></div>
+                                        <button class="reject" onclick="rejectLoan('${l.id}')"><i class="fas fa-times"></i> Final Reject</button>
                                     </div>
                                 </div>
                             `;
@@ -10674,7 +10675,9 @@ html+=`<div class="section-card" id="reportFilters"><div class="section-title"><
                             '<div style="margin-top:12px;padding:12px;background:var(--gray-50);border-radius:10px;font-size:12px;display:grid;gap:5px;">' +
                             '<div><strong>Guarantor responsibility:</strong> Review the amount, interest and repayment period before accepting.</div>' +
                             '<div>Applied: '+(x.application_date?new Date(x.application_date).toLocaleString('en-KE'):'—')+'</div>' +
-                            '<div>Other guarantor: '+(String(x.guarantor1_id||'').toUpperCase()===String(currentUser&&currentUser.idNumber||'').toUpperCase() ? String(x.guarantor2_status||'pending').toUpperCase() : String(x.guarantor1_status||'pending').toUpperCase())+'</div></div>' +
+                            '<div>Your response: <strong>'+String(x.guarantor_status||'pending').toUpperCase()+'</strong></div>' +
+                            '<div>Other guarantor: <strong>'+((String(x.guarantor_status||'pending').toLowerCase()==='pending') ? (String(x.guarantor1_status||'pending').toUpperCase()==='PENDING' ? String(x.guarantor2_status||'pending').toUpperCase() : String(x.guarantor1_status||'pending').toUpperCase()) : (String(x.guarantor1_status||'pending').toUpperCase()===String(x.guarantor_status||'pending').toUpperCase() ? String(x.guarantor2_status||'pending').toUpperCase() : String(x.guarantor1_status||'pending').toUpperCase()))+'</strong></div>' +
+                            '<div>Final admin approval happens only after both guarantors respond.</div></div>' +
                             '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;flex-wrap:wrap;"><button class="btn-outline" onclick="respondToGuarantorRequest(\''+x.id+'\',\'rejected\')"><i class="fas fa-times"></i> Decline</button><button class="btn-primary" onclick="respondToGuarantorRequest(\''+x.id+'\',\'accepted\')"><i class="fas fa-check"></i> Accept Guarantee</button></div>' +
                             '</div>';
                     });
@@ -10692,7 +10695,8 @@ html+=`<div class="section-card" id="reportFilters"><div class="section-title"><
                         const total=Number(x.total_repayment||0);
                         const paid=Number(x.amount_paid||0);
                         const remaining=Math.max(0,total-paid);
-                        const statusText=completed?'Loan Completed':rejected?'Declined':active?'Active Loan':'Application '+String(x.status||'pending');
+                        const progress=total>0 ? Math.min(100, Math.max(0, (paid/total)*100)) : 0;
+                        const statusText=completed?'Loan Completed':rejected?'Declined':active?'Active Loan':(x.both_guarantors_responded ? 'Awaiting Admin Final Decision' : 'Awaiting Other Guarantor');
                         html += '<div class="section-card" style="margin-bottom:14px;opacity:.98;">' +
                             '<div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;">' +
                             '<div><div style="font-size:15px;font-weight:800;">Guarantee History</div><div style="font-size:12px;color:var(--gray-500);margin-top:4px;">Borrower: <strong>'+ (applicant.full_name||'Member') +'</strong> · ID '+(applicant.id_number||'N/A')+'</div></div>' +
@@ -10704,11 +10708,13 @@ html+=`<div class="section-card" id="reportFilters"><div class="section-title"><
                             '<div class="metric-surface"><div class="metric-label">Balance</div><div class="metric-value">KES '+formatGuarantorMoney(remaining)+'</div></div></div>' +
                             '<div style="margin-top:12px;padding:12px;background:var(--gray-50);border-radius:10px;font-size:12px;display:grid;gap:5px;">' +
                             '<div><strong>Your response:</strong> '+status.toUpperCase()+(x.guarantor_responded_at?' · '+new Date(x.guarantor_responded_at).toLocaleString('en-KE'):'')+'</div>' +
+                            '<div><strong>Guarantor responses:</strong> G1 '+String(x.guarantor1_status||'pending').toUpperCase()+' · G2 '+String(x.guarantor2_status||'pending').toUpperCase()+'</div>' +
                             '<div><strong>Repayment period:</strong> '+(Number(x.repayment_days||0))+' days</div>' +
                             '<div><strong>Disbursed:</strong> '+(x.approved_date?new Date(x.approved_date).toLocaleString('en-KE'):'Not yet disbursed')+'</div>' +
                             '<div><strong>Due date:</strong> '+(x.repayment_due_date?new Date(x.repayment_due_date).toLocaleString('en-KE'):'Not yet set')+'</div>' +
                             '<div><strong>Total repayment:</strong> KES '+formatGuarantorMoney(total)+'</div>' +
-                            (active || completed ? '<div><strong>Progress:</strong> KES '+formatGuarantorMoney(paid)+' paid of KES '+formatGuarantorMoney(total)+' · KES '+formatGuarantorMoney(remaining)+' remaining</div>' : '') +
+                            (active || completed ? '<div><strong>Repayment progress:</strong> '+progress.toFixed(1)+'% · KES '+formatGuarantorMoney(paid)+' paid of KES '+formatGuarantorMoney(total)+' · KES '+formatGuarantorMoney(remaining)+' remaining</div>' +
+                            '<div style="margin-top:8px;height:10px;background:#e5e7eb;border-radius:999px;overflow:hidden;"><div style="height:100%;width:'+progress.toFixed(1)+'%;background:linear-gradient(90deg,#16a34a,#22c55e);border-radius:999px;"></div></div>' : '') +
                             '</div></div>';
                     });
                 }
@@ -10723,10 +10729,9 @@ html+=`<div class="section-card" id="reportFilters"><div class="section-title"><
             try {
                 const r = await callServer('getGuarantorRequests', {memberId: memberId, actorId: memberId});
                 if (r && r.success && r.requests) {
-                    const id=String((currentUser&&currentUser.idNumber)||memberId).toUpperCase();
-                    const pending=r.requests.filter(function(x){ return (String(x.guarantor1_id||'').toUpperCase()===id?x.guarantor1_status:x.guarantor2_status)==='pending'; });
+                    const pending=r.requests.filter(function(x){ return String(x.guarantor_status||'pending').toLowerCase()==='pending' && String(x.status||'pending').toLowerCase()==='pending'; });
                     const badge=document.getElementById('guarantorBadge'); if(badge){badge.textContent=pending.length;badge.style.display=pending.length?'inline-flex':'none';}
-                    const menu=document.getElementById('nav-guarantors'); if(menu) menu.style.display=(r.requests.length>0)?'flex':'none';
+                    const menu=document.getElementById('nav-guarantors'); if(menu) menu.style.display='flex';
                 }
                 return r;
             } catch(e) { console.warn('Guarantor requests:', e); return null; }
