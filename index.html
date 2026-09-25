@@ -5881,15 +5881,15 @@ function updateUserInfo(member) {
             var publicSidebar=document.getElementById('publicSidebarSection'); if(publicSidebar) publicSidebar.style.display='none';
             var secureSection=document.getElementById('secureMemberSection'); if(secureSection) secureSection.style.display='block';
             ['nav-project-water-secure','nav-project-poultry-secure','nav-trainings-secure'].forEach(function(id){ var item=document.getElementById(id); if(item) item.style.display='flex'; });
-            // Show and size the authenticated workspace sidebar immediately after login.
-            // The page-reload/session-restore path already calls showSidebar(); the direct
-            // login path must do the same or the sidebar area stays blank until Ctrl+F5.
-            if (typeof showSidebar === 'function') showSidebar();
             var adminSection=document.getElementById('adminSection');
             var role=String((member&&member.role)||'').toLowerCase();
             if(adminSection) adminSection.style.display=(role==='admin'||role==='super_admin'||role==='treasurer'||role==='customer_care'||role==='profile_approver')?'block':'none';
             updateUserInfo(member);
             updateMemberTopbar(member);
+            // Reveal and size the authenticated workspace navigation immediately.
+            // Do not wait for loadDashboard() or a later page reload: the sidebar
+            // must be present on the first successful sign-in as well as on refresh.
+            showSidebar();
         }
         async function loginUser(event) {
             event.preventDefault();
