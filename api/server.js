@@ -2209,8 +2209,12 @@ function normalizeKenyaPhone_(phone) {
 }
 
 function kcbInvoiceNumber_() {
-    // Keep this short, unique and easy to reconcile in KCB statements.
-    return 'BL' + Date.now().toString(36).toUpperCase() + crypto.randomBytes(4).toString('hex').toUpperCase();
+    // BUNI accepts the KCB account number or a unique order reference.
+    // Keep the reference <= 30 characters and unique for reconciliation.
+    const account = String(CONFIG.KCB_ACCOUNT_NUMBER || '').replace(/\D/g, '');
+    const suffix = 'BL' + Date.now().toString(36).toUpperCase() + crypto.randomBytes(3).toString('hex').toUpperCase();
+    const reference = account ? (account + '-' + suffix) : suffix;
+    return reference.slice(0, 30);
 }
 
 async function getKcbAccessToken_() {
@@ -2381,7 +2385,8 @@ async function initiateKcbMpesaPayment(data) {
             method: 'POST',
             headers: {
                 Authorization: 'Bearer ' + token,
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                Accept: 'application/json'
             },
             body: JSON.stringify(payload)
         });
@@ -2390,11 +2395,16 @@ async function initiateKcbMpesaPayment(data) {
         let body = {};
         try { body = raw ? JSON.parse(raw) : {}; } catch (_) { body = { raw }; }
 
-        const kcbResponse = body?.response || body?.Response || {};
+        // BUNI responses can be wrapped under response/Response/data or returned
+        // with the response fields at the top level. Preserve all of it for
+        // reconciliation, while never returning the OAuth token to the browser.
+        const kcbResponse = body?.response || body?.Response || body?.data || body || {};
+        const header = body?.header || body?.Header || {};
         const merchantRequestId = kcbResponse.MerchantRequestID || kcbResponse.merchantRequestID || null;
         const checkoutRequestId = kcbResponse.CheckoutRequestID || kcbResponse.checkoutRequestID || null;
-        const accepted = response.ok &&
-            String(kcbResponse.ResponseCode ?? kcbResponse.responseCode ?? '') === '0';
+        const responseCode = kcbResponse.ResponseCode ?? kcbResponse.responseCode ?? header.statusCode ?? header.StatusCode ?? '';
+        const responseDescription = kcbResponse.ResponseDescription || kcbResponse.responseDescription || kcbResponse.CustomerMessage || header.statusDescription || header.StatusDescription || raw || 'KCB request failed';
+        const accepted = response.ok && String(responseCode) === '0';
 
         const now = new Date().toISOString();
         const requestRow = {
@@ -2407,8 +2417,8 @@ async function initiateKcbMpesaPayment(data) {
             merchant_request_id: merchantRequestId,
             checkout_request_id: checkoutRequestId,
             status: accepted ? 'pending' : 'failed',
-            result_code: accepted ? 0 : (kcbResponse.ResponseCode ?? null),
-            result_description: kcbResponse.ResponseDescription || kcbResponse.responseDescription || raw || 'KCB request failed',
+            result_code: accepted ? 0 : (responseCode === '' ? null : Number.isFinite(Number(responseCode)) ? Number(responseCode) : null),
+            result_description: String(responseDescription),
             kcb_response: body,
             created_at: now,
             updated_at: now
@@ -2421,9 +2431,15 @@ async function initiateKcbMpesaPayment(data) {
         }
 
         if (!accepted) {
+            Logger.log('KCB STK rejected: ' + JSON.stringify({
+                httpStatus: response.status,
+                responseCode: responseCode,
+                responseDescription: responseDescription,
+                body: body
+            }));
             return {
                 success: false,
-                message: kcbResponse.ResponseDescription || kcbResponse.responseDescription || 'KCB rejected the payment request.'
+                message: 'KCB rejected the payment request (HTTP ' + response.status + (responseCode !== '' ? ', code ' + responseCode : '') + '): ' + String(responseDescription).slice(0, 300)
             };
         }
 
