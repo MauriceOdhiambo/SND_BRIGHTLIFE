@@ -693,7 +693,7 @@ async function resolveMemberUuidRequired_(reference, label) {
 async function getActor(actorReference, sessionToken) {
     var actorId = await resolveMemberUuidRequired_(actorReference, 'Authorized user');
     await validateSession_(actorId, sessionToken);
-    var result = await supabaseRequest('GET', 'members?select=id,unique_member_id,id_number,full_name,role,permissions,is_active&id=eq.' + encodeURIComponent(actorId) + '&limit=1');
+    var result = await supabaseRequest('GET', 'members?select=id,unique_member_id,id_number,full_name,phone_number,role,permissions,is_active&id=eq.' + encodeURIComponent(actorId) + '&limit=1');
     if (result.statusCode !== 200 || !Array.isArray(result.data) || !result.data.length) throw new Error('Authorized user not found');
     var actor = result.data[0];
     actor.role = String(actor.role || 'member').toLowerCase();
@@ -723,7 +723,7 @@ async function getAccountAccess(data) {
             success:true,
             member:{
                 id:actor.id, uniqueId:actor.unique_member_id, idNumber:actor.id_number,
-                name:actor.full_name, role:actor.role, isActive:actor.is_active,
+                name:actor.full_name, phoneNumber:actor.phone_number || '', role:actor.role, isActive:actor.is_active,
                 permissions:actor.permissions
             },
             isAdmin:['super_admin','admin'].indexOf(actor.role) >= 0,
@@ -2317,13 +2317,20 @@ async function initiateKcbMpesaPayment(data) {
 
         const memberResult = await supabaseRequest(
             'GET',
-            'members?select=id,full_name,phone_number,is_active,registration_fee_paid,registration_fee_status,savings_balance&id=' +
+            'members?select=id,unique_member_id,id_number,full_name,phone_number,is_active,registration_fee_paid,registration_fee_status,savings_balance&id=' +
             encodeURIComponent(memberId) + '&limit=1'
         );
         if (memberResult.statusCode !== 200 || !Array.isArray(memberResult.data) || !memberResult.data.length) {
-            throw new Error('Member not found.');
+            Logger.log('KCB member lookup failed: ' + JSON.stringify({
+                memberId: memberId,
+                statusCode: memberResult.statusCode,
+                data: memberResult.data
+            }));
+            const detail = memberResult.data && (memberResult.data.message || memberResult.data.error || memberResult.data.hint || memberResult.data.details);
+            throw new Error(detail ? 'Unable to load your member profile: ' + detail : 'Member profile could not be loaded. Please sign in again.');
         }
         const member = memberResult.data[0];
+        if (!member.phone_number) throw new Error('Your member profile does not have a phone number. Please edit your profile and save the phone number before paying with KCB M-Pesa.');
 
         const phone = normalizeKenyaPhone_(member.phone_number);
         if (purpose === 'registration' && amount !== Number(CONFIG.REGISTRATION_FEE)) {
