@@ -10,6 +10,18 @@ const CONFIG = {
   ADMIN_WHATSAPP: process.env.ADMIN_WHATSAPP || '+254111640106',
   PAYBILL_NUMBER: process.env.PAYBILL_NUMBER || '247247',
   PAYBILL_ACCOUNT: process.env.PAYBILL_ACCOUNT || '0960179935983',
+
+  // KCB BUNI
+  KCB_BASE_URL: process.env.KCB_BASE_URL || 'https://uat.buni.kcbgroup.com',
+  KCB_CONSUMER_KEY: process.env.KCB_CONSUMER_KEY || '',
+  KCB_CONSUMER_SECRET: process.env.KCB_CONSUMER_SECRET || '',
+  KCB_ACCOUNT_NUMBER: process.env.KCB_ACCOUNT_NUMBER || '',
+  KCB_SHARED_SHORT_CODE: process.env.KCB_SHARED_SHORT_CODE || '522522',
+  KCB_ORG_PASSKEY: process.env.KCB_ORG_PASSKEY || '',
+  KCB_CALLBACK_URL: process.env.KCB_CALLBACK_URL || '',
+  KCB_IPN_URL: process.env.KCB_IPN_URL || '',
+  KCB_TRANSACTION_DESCRIPTION: process.env.KCB_TRANSACTION_DESCRIPTION || 'Brightlife',
+
   REGISTRATION_FEE: 500,
   MIN_SAVINGS_MONTHS: 3,
   MAX_LOAN_MULTIPLIER: 3,
@@ -2170,20 +2182,544 @@ async function synchronizeMemberAccountAge(data) {
     }
 }
 
-function initiateKcbMpesaPayment(data) {
+
+let kcbTokenCache_ = { token: '', expiresAt: 0 };
+
+function kcbBaseUrl_() {
+    return String(CONFIG.KCB_BASE_URL || '').replace(/\/+$/, '');
+}
+
+function requireKcbConfig_() {
+    const missing = [];
+    if (!CONFIG.KCB_CONSUMER_KEY) missing.push('KCB_CONSUMER_KEY');
+    if (!CONFIG.KCB_CONSUMER_SECRET) missing.push('KCB_CONSUMER_SECRET');
+    if (!CONFIG.KCB_CALLBACK_URL) missing.push('KCB_CALLBACK_URL');
+    if (!CONFIG.KCB_ACCOUNT_NUMBER) missing.push('KCB_ACCOUNT_NUMBER');
+    if (missing.length) {
+        throw new Error('KCB is not configured. Missing: ' + missing.join(', '));
+    }
+}
+
+function normalizeKenyaPhone_(phone) {
+    let value = String(phone || '').replace(/\D/g, '');
+    if (value.startsWith('0')) value = '254' + value.slice(1);
+    if (value.startsWith('7')) value = '254' + value;
+    if (value.startsWith('254')) return value;
+    throw new Error('Member phone number must be a Kenyan mobile number.');
+}
+
+function kcbInvoiceNumber_() {
+    // Keep this short, unique and easy to reconcile in KCB statements.
+    return 'BL' + Date.now().toString(36).toUpperCase() + crypto.randomBytes(4).toString('hex').toUpperCase();
+}
+
+async function getKcbAccessToken_() {
+    requireKcbConfig_();
+    if (kcbTokenCache_.token && Date.now() < kcbTokenCache_.expiresAt) {
+        return kcbTokenCache_.token;
+    }
+
+    const basic = Buffer.from(
+        String(CONFIG.KCB_CONSUMER_KEY) + ':' + String(CONFIG.KCB_CONSUMER_SECRET)
+    ).toString('base64');
+
+    const response = await fetch(kcbBaseUrl_() + '/token', {
+        method: 'POST',
+        headers: {
+            Authorization: 'Basic ' + basic,
+            'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: 'grant_type=client_credentials'
+    });
+
+    const text = await response.text();
+    let body = {};
+    try { body = text ? JSON.parse(text) : {}; } catch (_) { body = { raw: text }; }
+
+    if (!response.ok || !body.access_token) {
+        Logger.log('KCB token error: ' + JSON.stringify({ status: response.status, body }));
+        throw new Error('KCB authentication failed. Check your BUNI consumer key/secret and API subscription.');
+    }
+
+    const expiresIn = Number(body.expires_in || 3600);
+    kcbTokenCache_ = {
+        token: String(body.access_token),
+        expiresAt: Date.now() + Math.max(60, expiresIn - 60) * 1000
+    };
+    return kcbTokenCache_.token;
+}
+
+function kcbHeaderValue_(headers, name) {
+    if (!headers) return '';
+    const wanted = String(name || '').toLowerCase();
+    for (const key of Object.keys(headers)) {
+        if (String(key).toLowerCase() === wanted) return headers[key];
+    }
+    return '';
+}
+
+function extractKcbStkResult_(payload) {
+    const cb = payload?.Body?.stkCallback || payload?.body?.stkCallback || payload?.stkCallback || payload || {};
+    const items = Array.isArray(cb?.CallbackMetadata?.Item)
+        ? cb.CallbackMetadata.Item
+        : Array.isArray(cb?.callbackMetadata?.Item)
+            ? cb.callbackMetadata.Item
+            : [];
+
+    const metadata = {};
+    items.forEach(item => {
+        if (item && item.Name) metadata[String(item.Name)] = item.Value;
+    });
+
     return {
-        success: false,
-        message: 'KCB M-Pesa integration is not enabled in this database build. Please use the manual M-Pesa payment option.'
+        merchantRequestId: cb.MerchantRequestID || cb.merchantRequestID || null,
+        checkoutRequestId: cb.CheckoutRequestID || cb.checkoutRequestID || null,
+        resultCode: cb.ResultCode !== undefined ? Number(cb.ResultCode) : null,
+        resultDescription: cb.ResultDesc || cb.resultDescription || null,
+        amount: numberValue(metadata.Amount),
+        mpesaReceiptNumber: metadata.MpesaReceiptNumber || metadata.MpesaReceipt || null,
+        phoneNumber: metadata.PhoneNumber ? String(metadata.PhoneNumber) : null,
+        transactionDate: metadata.TransactionDate || null
     };
 }
 
-function getKcbPaymentStatus(data) {
-    return {
-        success: false,
-        payment: {
-            status: 'failed',
-            message: 'KCB M-Pesa integration is not enabled in this database build.'
+async function getKcbPaymentRequest_(requestId, memberId) {
+    const clauses = [];
+    if (requestId) clauses.push('id=eq.' + encodeURIComponent(requestId));
+    if (memberId) clauses.push('member_id=eq.' + encodeURIComponent(memberId));
+    const endpoint = 'kcb_payment_requests?select=*&' + clauses.join('&') + '&limit=1';
+    const r = await supabaseRequest('GET', endpoint);
+    if (r.statusCode !== 200 || !Array.isArray(r.data) || !r.data.length) return null;
+    return r.data[0];
+}
+
+async function initiateKcbMpesaPayment(data) {
+    try {
+        requireKcbConfig_();
+
+        const memberId = await resolveMemberUuidRequired_(data && data.memberId, 'Member');
+        if (String(data && data.actorId) !== String(memberId)) {
+            throw new Error('You can only initiate a payment for your own member account.');
         }
+
+        const purpose = String(data && data.purpose || '').toLowerCase();
+        if (!['registration', 'savings', 'loan_repayment'].includes(purpose)) {
+            throw new Error('Invalid KCB payment purpose.');
+        }
+
+        const amount = Number(data && data.amount);
+        if (!Number.isInteger(amount) || amount <= 0) {
+            throw new Error('KCB M-Pesa amount must be a whole positive KES amount.');
+        }
+
+        let loanId = data && data.loanId ? String(data.loanId) : null;
+        if (purpose === 'loan_repayment' && !loanId) throw new Error('Loan ID is required for loan repayment.');
+
+        const memberResult = await supabaseRequest(
+            'GET',
+            'members?select=id,full_name,phone_number,is_active,registration_fee_paid,registration_fee_status,savings_balance&id=' +
+            encodeURIComponent(memberId) + '&limit=1'
+        );
+        if (memberResult.statusCode !== 200 || !Array.isArray(memberResult.data) || !memberResult.data.length) {
+            throw new Error('Member not found.');
+        }
+        const member = memberResult.data[0];
+
+        const phone = normalizeKenyaPhone_(member.phone_number);
+        if (purpose === 'registration' && amount !== Number(CONFIG.REGISTRATION_FEE)) {
+            throw new Error('Registration fee must be exactly KES ' + CONFIG.REGISTRATION_FEE + '.');
+        }
+
+        if (purpose === 'loan_repayment') {
+            const loanResult = await supabaseRequest(
+                'GET',
+                'loans?select=id,member_id,status,amount,total_repayment,amount_paid&id=' +
+                encodeURIComponent(loanId) + '&limit=1'
+            );
+            if (loanResult.statusCode !== 200 || !loanResult.data?.length) throw new Error('Loan not found.');
+            const loan = loanResult.data[0];
+            if (String(loan.member_id) !== String(memberId)) throw new Error('This loan does not belong to you.');
+            if (loan.status !== 'active') throw new Error('Loan is not active.');
+            const total = numberValue(loan.total_repayment || numberValue(loan.amount) * (1 + numberValue(loan.interest_rate)));
+            const remaining = Math.max(0, total - numberValue(loan.amount_paid));
+            if (amount > remaining) throw new Error('Payment exceeds the remaining balance of KES ' + remaining.toFixed(2) + '.');
+        }
+
+        const invoiceNumber = kcbInvoiceNumber_();
+        const callbackUrl = CONFIG.KCB_CALLBACK_URL;
+        const token = await getKcbAccessToken_();
+
+        const payload = {
+            phoneNumber: phone,
+            amount: String(amount),
+            invoiceNumber: invoiceNumber,
+            sharedShortCode: true,
+            orgShortCode: String(CONFIG.KCB_SHARED_SHORT_CODE || '522522'),
+            orgPassKey: String(CONFIG.KCB_ORG_PASSKEY || ''),
+            callbackUrl: callbackUrl,
+            transactionDescription: String(CONFIG.KCB_TRANSACTION_DESCRIPTION || 'Brightlife').slice(0, 13)
+        };
+
+        const response = await fetch(kcbBaseUrl_() + '/mm/api/request/1.0.0/stkpush', {
+            method: 'POST',
+            headers: {
+                Authorization: 'Bearer ' + token,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        const raw = await response.text();
+        let body = {};
+        try { body = raw ? JSON.parse(raw) : {}; } catch (_) { body = { raw }; }
+
+        const kcbResponse = body?.response || body?.Response || {};
+        const merchantRequestId = kcbResponse.MerchantRequestID || kcbResponse.merchantRequestID || null;
+        const checkoutRequestId = kcbResponse.CheckoutRequestID || kcbResponse.checkoutRequestID || null;
+        const accepted = response.ok &&
+            String(kcbResponse.ResponseCode ?? kcbResponse.responseCode ?? '') === '0';
+
+        const now = new Date().toISOString();
+        const requestRow = {
+            member_id: memberId,
+            loan_id: loanId,
+            purpose: purpose,
+            amount: amount,
+            phone_number: phone,
+            invoice_number: invoiceNumber,
+            merchant_request_id: merchantRequestId,
+            checkout_request_id: checkoutRequestId,
+            status: accepted ? 'pending' : 'failed',
+            result_code: accepted ? 0 : (kcbResponse.ResponseCode ?? null),
+            result_description: kcbResponse.ResponseDescription || kcbResponse.responseDescription || raw || 'KCB request failed',
+            kcb_response: body,
+            created_at: now,
+            updated_at: now
+        };
+
+        const save = await supabaseRequest('POST', 'kcb_payment_requests', requestRow);
+        if (save.statusCode < 200 || save.statusCode >= 300) {
+            Logger.log('KCB request database insert failed: ' + JSON.stringify(save.data));
+            throw new Error('KCB request was sent but could not be saved. Check kcb_payment_requests immediately.');
+        }
+
+        if (!accepted) {
+            return {
+                success: false,
+                message: kcbResponse.ResponseDescription || kcbResponse.responseDescription || 'KCB rejected the payment request.'
+            };
+        }
+
+        return {
+            success: true,
+            requestId: Array.isArray(save.data) && save.data[0] ? save.data[0].id : null,
+            checkoutRequestId: checkoutRequestId,
+            message: 'KCB payment prompt sent to ' + phone + '. Enter your M-Pesa PIN on the phone.'
+        };
+    } catch (error) {
+        Logger.log('initiateKcbMpesaPayment: ' + (error.stack || error.message));
+        return { success: false, message: error.message };
+    }
+}
+
+async function getKcbPaymentStatus(data) {
+    try {
+        const requestId = String(data && data.requestId || '').trim();
+        if (!requestId) throw new Error('KCB payment request ID is required.');
+
+        const memberId = await resolveMemberUuidRequired_(data && data.memberId, 'Member');
+        if (String(data && data.actorId) !== String(memberId)) throw new Error('Unauthorized payment status request.');
+
+        const request = await getKcbPaymentRequest_(requestId, memberId);
+        if (!request) throw new Error('KCB payment request not found.');
+
+        return {
+            success: true,
+            payment: {
+                id: request.id,
+                purpose: request.purpose,
+                amount: numberValue(request.amount),
+                status: request.status,
+                checkoutRequestId: request.checkout_request_id,
+                receipt: request.mpesa_receipt_number || null,
+                message: request.result_description || null,
+                completedAt: request.completed_at || null
+            }
+        };
+    } catch (error) {
+        return { success: false, message: error.message };
+    }
+}
+
+async function createKcbPendingTransaction_(payment, receipt) {
+    const existing = await supabaseRequest(
+        'GET',
+        'transactions?select=id,status&type=eq.' + encodeURIComponent(payment.purpose === 'loan_repayment' ? 'loan_repayment' : payment.purpose) +
+        '&mpesa_code=eq.' + encodeURIComponent(receipt) + '&limit=1'
+    );
+    if (existing.statusCode === 200 && existing.data?.length) return existing.data[0];
+
+    const type = payment.purpose === 'registration' ? 'registration'
+        : payment.purpose === 'savings' ? 'savings'
+        : 'loan_repayment';
+
+    const row = {
+        member_id: payment.member_id,
+        type: type,
+        amount: numberValue(payment.amount),
+        payment_method: 'kcb_mpesa',
+        mpesa_code: receipt,
+        description: payment.purpose === 'registration'
+            ? 'KCB M-Pesa registration fee - Pending Admin Approval'
+            : payment.purpose === 'savings'
+                ? 'KCB M-Pesa savings deposit - Pending Admin Approval'
+                : 'KCB M-Pesa loan repayment',
+        status: payment.purpose === 'loan_repayment' ? 'completed' : 'pending',
+        created_by: payment.member_id,
+        created_at: new Date().toISOString()
+    };
+    const r = await supabaseRequest('POST', 'transactions', row);
+    if (r.statusCode < 200 || r.statusCode >= 300) {
+        throw new Error('Payment was received by KCB but the Brightlife transaction ledger could not be updated.');
+    }
+    return Array.isArray(r.data) ? r.data[0] : r.data;
+}
+
+async function applyKcbLoanRepayment_(payment, receipt) {
+    const loanId = payment.loan_id;
+    if (!loanId) throw new Error('KCB loan payment has no loan ID.');
+
+    // Idempotency guard: KCB may retry a callback, and a callback can also
+    // be retried if the database update after the ledger write fails.
+    const priorRepayment = await supabaseRequest(
+        'GET',
+        'loan_repayments?select=id,amount&mpesa_code=eq.' +
+        encodeURIComponent(receipt) + '&limit=1'
+    );
+    if (priorRepayment.statusCode === 200 && priorRepayment.data?.length) {
+        return { alreadyApplied: true };
+    }
+
+    const priorTransaction = await supabaseRequest(
+        'GET',
+        'transactions?select=id,status&type=eq.loan_repayment&mpesa_code=eq.' +
+        encodeURIComponent(receipt) + '&limit=1'
+    );
+    if (priorTransaction.statusCode === 200 && priorTransaction.data?.length) {
+        return { alreadyApplied: true };
+    }
+
+    const loanResult = await supabaseRequest(
+        'GET',
+        'loans?select=*&id=eq.' + encodeURIComponent(loanId) + '&limit=1'
+    );
+    if (loanResult.statusCode !== 200 || !loanResult.data?.length) throw new Error('Loan not found for KCB payment.');
+    const loan = loanResult.data[0];
+
+    if (String(loan.member_id) !== String(payment.member_id)) throw new Error('Loan/member mismatch.');
+    if (loan.status !== 'active') return { alreadyApplied: true };
+
+    const total = numberValue(loan.total_repayment || numberValue(loan.amount) * (1 + numberValue(loan.interest_rate)));
+    const currentPaid = numberValue(loan.amount_paid);
+    const amount = numberValue(payment.amount);
+    const remaining = Math.max(0, total - currentPaid);
+    if (amount > remaining + 0.001) throw new Error('KCB repayment exceeds the current loan balance.');
+
+    const newAmountPaid = currentPaid + amount;
+    const fullyPaid = newAmountPaid >= total - 0.001;
+    const now = new Date().toISOString();
+
+    const update = await supabaseRequest(
+        'PATCH',
+        'loans?id=eq.' + encodeURIComponent(loanId) +
+        '&status=eq.active&amount_paid=eq.' + encodeURIComponent(String(currentPaid)),
+        {
+            amount_paid: newAmountPaid,
+            is_fully_paid: fullyPaid,
+            status: fullyPaid ? 'completed' : 'active',
+            updated_at: now
+        }
+    );
+    if (update.statusCode !== 200 || !Array.isArray(update.data) || update.data.length !== 1) {
+        throw new Error('Loan balance changed while KCB payment was being applied.');
+    }
+
+    const repayment = await supabaseRequest('POST', 'loan_repayments', {
+        loan_id: loanId,
+        member_id: payment.member_id,
+        amount: amount,
+        payment_method: 'kcb_mpesa',
+        mpesa_code: receipt,
+        payment_date: now,
+        created_at: now
+    });
+    if (repayment.statusCode !== 201) {
+        await supabaseRequest(
+            'PATCH',
+            'loans?id=eq.' + encodeURIComponent(loanId) +
+            '&amount_paid=eq.' + encodeURIComponent(String(newAmountPaid)),
+            { amount_paid: currentPaid, is_fully_paid: false, status: 'active', updated_at: new Date().toISOString() }
+        );
+        throw new Error('Loan repayment could not be recorded; loan balance was restored.');
+    }
+
+    await supabaseRequest('POST', 'transactions', {
+        member_id: payment.member_id,
+        type: 'loan_repayment',
+        amount: amount,
+        payment_method: 'kcb_mpesa',
+        mpesa_code: receipt,
+        description: 'KCB M-Pesa loan repayment',
+        status: 'completed',
+        created_by: payment.member_id,
+        created_at: now
+    });
+
+    return { alreadyApplied: false, fullyPaid: fullyPaid, newAmountPaid: newAmountPaid };
+}
+
+export async function handleKcbStkCallback(payload) {
+    const result = extractKcbStkResult_(payload);
+    const checkout = result.checkoutRequestId;
+
+    if (!checkout) {
+        Logger.log('KCB STK callback missing CheckoutRequestID: ' + JSON.stringify(payload));
+        return { success: false, message: 'Missing CheckoutRequestID.' };
+    }
+
+    const found = await supabaseRequest(
+        'GET',
+        'kcb_payment_requests?select=*&checkout_request_id=eq.' +
+        encodeURIComponent(checkout) + '&limit=1'
+    );
+    if (found.statusCode !== 200 || !found.data?.length) {
+        Logger.log('KCB callback for unknown CheckoutRequestID: ' + checkout);
+        return { success: false, message: 'Unknown CheckoutRequestID.' };
+    }
+
+    const payment = found.data[0];
+    const now = new Date().toISOString();
+    const successful = Number(result.resultCode) === 0;
+    const receipt = String(result.mpesaReceiptNumber || '').trim();
+
+    if (successful && !receipt) {
+        throw new Error('KCB reported success without an M-Pesa receipt.');
+    }
+
+    if (payment.status === 'completed' || payment.status === 'failed' || payment.status === 'cancelled') {
+        return { success: true, duplicate: true, status: payment.status };
+    }
+
+    let finalStatus = successful ? 'completed' : 'failed';
+
+    if (successful) {
+        if (payment.purpose === 'loan_repayment') {
+            await applyKcbLoanRepayment_(payment, receipt);
+        } else {
+            await createKcbPendingTransaction_(payment, receipt);
+        }
+    }
+
+    const update = {
+        status: finalStatus,
+        result_code: result.resultCode,
+        result_description: result.resultDescription,
+        mpesa_receipt_number: receipt || null,
+        callback_payload: payload,
+        updated_at: now,
+        completed_at: successful ? now : null
+    };
+
+    const saved = await supabaseRequest(
+        'PATCH',
+        'kcb_payment_requests?id=eq.' + encodeURIComponent(payment.id),
+        update
+    );
+    if (saved.statusCode !== 200) {
+        throw new Error('KCB callback was processed but the payment request could not be updated.');
+    }
+
+    return { success: true, status: finalStatus, checkoutRequestId: checkout };
+}
+
+export async function handleKcbIpn(payload, headers = {}) {
+    const now = new Date().toISOString();
+    const transactionReference = String(
+        payload?.transactionReference ||
+        payload?.TransactionReference ||
+        payload?.requestPayload?.transactionReference ||
+        payload?.requestPayload?.additionalData?.transactionReference ||
+        ''
+    ).trim();
+
+    const requestId = String(
+        payload?.requestId ||
+        payload?.RequestId ||
+        ''
+    ).trim();
+
+    const customerReference = String(
+        payload?.customerReference ||
+        payload?.CustomerReference ||
+        ''
+    ).trim();
+
+    const amount = numberValue(
+        payload?.transactionAmount ||
+        payload?.TransactionAmount ||
+        payload?.amount
+    );
+
+    const signature = String(
+        kcbHeaderValue_(headers, 'signature') ||
+        kcbHeaderValue_(headers, 'x-signature') ||
+        ''
+    );
+
+    const insert = await supabaseRequest('POST', 'kcb_ipn_events', {
+        transaction_reference: transactionReference || null,
+        request_id: requestId || null,
+        customer_reference: customerReference || null,
+        transaction_amount: amount || null,
+        currency: payload?.currency || payload?.Currency || 'KES',
+        balance: numberValue(payload?.balance || payload?.Balance) || null,
+        customer_name: payload?.customerName || payload?.CustomerName || null,
+        customer_mobile_number: payload?.customerMobileNumber || payload?.CustomerMobileNumber || null,
+        channel_code: payload?.channelCode || payload?.ChannelCode || null,
+        narration: payload?.narration || payload?.Narration || null,
+        credit_account_identifier: payload?.creditAccountIdentifier || payload?.CreditAccountIdentifier || null,
+        organization_short_code: payload?.organizationShortCode || payload?.OrganizationShortCode || null,
+        till_number: payload?.tillNumber || payload?.TillNumber || null,
+        payload: payload,
+        signature: signature || null,
+        received_at: now
+    });
+
+    if (insert.statusCode < 200 || insert.statusCode >= 300) {
+        Logger.log('KCB IPN database insert failed: ' + JSON.stringify(insert.data));
+        throw new Error('Could not store KCB IPN event.');
+    }
+
+    // If an IPN contains our customer reference/invoice, attach it to the
+    // corresponding payment request. The STK callback remains the source of
+    // truth for STK completion.
+    if (customerReference) {
+        await supabaseRequest(
+            'PATCH',
+            'kcb_payment_requests?invoice_number=eq.' + encodeURIComponent(customerReference),
+            {
+                ipn_reference: transactionReference || null,
+                ipn_payload: payload,
+                updated_at: now
+            },
+            { prefer: 'return=minimal' }
+        );
+    }
+
+    return {
+        transactionID: transactionReference || requestId || crypto.randomUUID(),
+        statusCode: 0,
+        statusMessage: 'Accepted'
     };
 }
 
@@ -6443,7 +6979,45 @@ export async function runFunction(functionName, params={}) {
 }
 
 async function handler(req,res){
-  if(req.method==='OPTIONS'){res.setHeader('Access-Control-Allow-Origin','*');res.setHeader('Access-Control-Allow-Methods','POST, OPTIONS');res.setHeader('Access-Control-Allow-Headers','Content-Type, Authorization');return res.status(204).end();}
+  if(req.method==='OPTIONS'){res.setHeader('Access-Control-Allow-Origin','*');res.setHeader('Access-Control-Allow-Methods','POST, OPTIONS');res.setHeader('Access-Control-Allow-Headers','Content-Type, Authorization, Signature, X-Signature');return res.status(204).end();}
+
+  // KCB calls these URLs directly, without a Brightlife member session.
+  // Use /api/server?kcb=stk for the STK callback and /api/server?kcb=ipn
+  // for the bank IPN callback.
+  const requestUrl = new URL(req.url || '/', 'https://brightlifesnd.com');
+  const kcbRoute = requestUrl.searchParams.get('kcb');
+  if (kcbRoute === 'health') {
+    return res.status(200).json({
+      success: true,
+      kcbConfigured: Boolean(CONFIG.KCB_CONSUMER_KEY && CONFIG.KCB_CONSUMER_SECRET && CONFIG.KCB_CALLBACK_URL && CONFIG.KCB_ACCOUNT_NUMBER),
+      callbackUrlConfigured: Boolean(CONFIG.KCB_CALLBACK_URL),
+      ipnUrlConfigured: Boolean(CONFIG.KCB_IPN_URL)
+    });
+  }
+  if (kcbRoute === 'stk') {
+    if(req.method!=='POST') return res.status(405).json({success:false,message:'Method not allowed.'});
+    try {
+      const result = await handleKcbStkCallback(typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {}));
+      return res.status(result.success === false ? 400 : 200).json(result);
+    } catch(e) {
+      Logger.log('KCB STK callback error: ' + (e.stack || e.message));
+      // Return 200 so the callback transport itself is acknowledged. The
+      // database error is logged for reconciliation rather than retried blindly.
+      return res.status(200).json({success:false,message:e.message || 'Callback processing error.'});
+    }
+  }
+  if (kcbRoute === 'ipn') {
+    if(req.method!=='POST') return res.status(405).json({success:false,message:'Method not allowed.'});
+    try {
+      const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
+      const result = await handleKcbIpn(body, req.headers || {});
+      return res.status(200).json(result);
+    } catch(e) {
+      Logger.log('KCB IPN error: ' + (e.stack || e.message));
+      return res.status(500).json({transactionID:crypto.randomUUID(),statusCode:1,statusMessage:e.message || 'IPN processing failed.'});
+    }
+  }
+
   if(req.method!=='POST')return res.status(405).json({success:false,message:'Method not allowed.'});
   try{
     const body=typeof req.body==='string'?JSON.parse(req.body):req.body||{};
