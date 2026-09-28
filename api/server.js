@@ -2317,7 +2317,7 @@ async function initiateKcbMpesaPayment(data) {
 
         const memberResult = await supabaseRequest(
             'GET',
-            'members?select=id,unique_member_id,id_number,full_name,phone_number,is_active,registration_fee_paid,registration_fee_status,savings_balance&id=' +
+            'members?select=id,unique_member_id,id_number,full_name,phone_number,is_active,registration_fee_paid,registration_fee_status,savings_balance&id=eq.' +
             encodeURIComponent(memberId) + '&limit=1'
         );
         if (memberResult.statusCode !== 200 || !Array.isArray(memberResult.data) || !memberResult.data.length) {
@@ -2326,8 +2326,18 @@ async function initiateKcbMpesaPayment(data) {
                 statusCode: memberResult.statusCode,
                 data: memberResult.data
             }));
-            const detail = memberResult.data && (memberResult.data.message || memberResult.data.error || memberResult.data.hint || memberResult.data.details);
-            throw new Error(detail ? 'Unable to load your member profile: ' + detail : 'Member profile could not be loaded. Please sign in again.');
+            const detail = memberResult.data && (
+                memberResult.data.message ||
+                memberResult.data.error ||
+                memberResult.data.hint ||
+                memberResult.data.details
+            );
+            Logger.log('KCB member profile query response: ' + JSON.stringify(memberResult.data));
+            throw new Error(
+                detail
+                    ? 'Unable to load your member profile: ' + detail
+                    : 'Member profile could not be loaded. Please sign in again.'
+            );
         }
         const member = memberResult.data[0];
         if (!member.phone_number) throw new Error('Your member profile does not have a phone number. Please edit your profile and save the phone number before paying with KCB M-Pesa.');
@@ -2340,7 +2350,7 @@ async function initiateKcbMpesaPayment(data) {
         if (purpose === 'loan_repayment') {
             const loanResult = await supabaseRequest(
                 'GET',
-                'loans?select=id,member_id,status,amount,total_repayment,amount_paid&id=' +
+                'loans?select=id,member_id,status,amount,total_repayment,amount_paid&id=eq.' +
                 encodeURIComponent(loanId) + '&limit=1'
             );
             if (loanResult.statusCode !== 200 || !loanResult.data?.length) throw new Error('Loan not found.');
