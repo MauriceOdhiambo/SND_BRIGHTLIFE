@@ -5749,10 +5749,12 @@ function navigateTo(page) {
             sessionStorage.setItem('memberId', m.idNumber || sessionStorage.getItem('memberId') || memberId);
             sessionStorage.setItem('memberUniqueId', m.uniqueId || sessionStorage.getItem('memberUniqueId') || '');
             sessionStorage.setItem('memberName', m.name || sessionStorage.getItem('memberName') || 'Member');
+            if (m.phoneNumber || m.phone_number) sessionStorage.setItem('phoneNumber', m.phoneNumber || m.phone_number);
             sessionStorage.setItem('memberRole', m.role || 'member');
             sessionStorage.setItem('isActive', String(m.isActive === true));
             sessionStorage.setItem('permissions', JSON.stringify(m.permissions || {}));
-            currentUser = Object.assign({}, currentUser || {}, {id:m.id,idNumber:m.idNumber,uniqueId:m.uniqueId,name:m.name,role:m.role,isActive:m.isActive,permissions:m.permissions});
+            currentUser = Object.assign({}, currentUser || {}, {id:m.id,idNumber:m.idNumber,uniqueId:m.uniqueId,name:m.name,phoneNumber:m.phoneNumber || m.phone_number || sessionStorage.getItem('phoneNumber') || '',role:m.role,isActive:m.isActive,permissions:m.permissions});
+            cacheMemberSession_(currentUser);
             updateUserInfo(currentUser);
             return result;
         }
@@ -7925,7 +7927,7 @@ if(!document.getElementById('brightlifeProjectsPublicHeaderStyles')){var st=docu
             const isActive = sessionStorage.getItem('isActive') === 'true';
             const biodataCompleted = sessionStorage.getItem('biodataCompleted') === 'true';
             const registrationFeeStatus = sessionStorage.getItem('registrationFeeStatus') || 'pending';
-            const profilePhone = (typeof currentUser !== 'undefined' && currentUser && (currentUser.phoneNumber || currentUser.phone_number)) || (window.currentUser && (window.currentUser.phoneNumber || window.currentUser.phone_number)) || '';
+            const profilePhone = (typeof currentUser !== 'undefined' && currentUser && (currentUser.phoneNumber || currentUser.phone_number)) || (window.currentUser && (window.currentUser.phoneNumber || window.currentUser.phone_number)) || sessionStorage.getItem('phoneNumber') || '';
 
             const isRegistration = biodataCompleted && !isActive && registrationFeeStatus !== 'approved';
             const defaultAmount = isRegistration ? 500 : 100;
