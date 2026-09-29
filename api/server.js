@@ -2226,13 +2226,14 @@ function normalizeKenyaPhone_(phone) {
 }
 
 function kcbInvoiceNumber_() {
-    // The supplied KCB STK Push specification requires:
-    // KCBTILLNO-YOURACCREF (max 30 characters).
-    // For the documented KCB paybill 522533 this becomes, for example:
-    // 522533-BL26ABC123XYZ.
+    // KCB STK specification: invoiceNumber must be unique and follow
+    // KCBTILLNO-YOURACCREF (maximum 30 characters).
+    // Brightlife's KCB account reference is 7775157, so keep that visible
+    // and append a short unique suffix to prevent duplicate invoices.
     const shortCode = String(CONFIG.KCB_SHARED_SHORT_CODE || '522533').trim();
-    const suffix = 'BL' + Date.now().toString(36).toUpperCase() + crypto.randomBytes(4).toString('hex').toUpperCase();
-    const reference = shortCode + '-' + suffix;
+    const accountRef = String(process.env.KCB_ACCOUNT_REFERENCE || '7775157').replace(/[^A-Za-z0-9]/g, '');
+    const unique = Date.now().toString(36).toUpperCase().slice(-6) + crypto.randomBytes(2).toString('hex').toUpperCase();
+    const reference = shortCode + '-' + accountRef + '-' + unique;
     return reference.slice(0, 30);
 }
 
