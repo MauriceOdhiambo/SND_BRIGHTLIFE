@@ -26,6 +26,15 @@ const CONFIG = {
   KCB_IPN_URL: process.env.KCB_IPN_URL || '',
   KCB_TRANSACTION_DESCRIPTION: process.env.KCB_TRANSACTION_DESCRIPTION || 'Brightlife',
 
+  // KCB BUNI Funds Transfer (outbound payments). These values are deliberately
+  // blank until KCB confirms the production account/company configuration.
+  KCB_FT_COMPANY_CODE: process.env.KCB_FT_COMPANY_CODE || '',
+  KCB_FT_DEBIT_ACCOUNT_NUMBER: process.env.KCB_FT_DEBIT_ACCOUNT_NUMBER || '',
+  KCB_FT_CALLBACK_URL: process.env.KCB_FT_CALLBACK_URL || '',
+  KCB_FT_CALLBACK_SECRET: process.env.KCB_FT_CALLBACK_SECRET || '',
+  KCB_FT_TRANSACTION_TYPE: process.env.KCB_FT_TRANSACTION_TYPE || 'MO',
+  KCB_FT_BENEFICIARY_BANK_CODE: process.env.KCB_FT_BENEFICIARY_BANK_CODE || 'MPESA',
+
   REGISTRATION_FEE: 500,
   MIN_SAVINGS_MONTHS: 3,
   MAX_LOAN_MULTIPLIER: 3,
@@ -2282,6 +2291,213 @@ function kcbHeaderValue_(headers, name) {
     return '';
 }
 
+function requireKcbFundsTransferConfig_() {
+    const missing = [];
+    if (!CONFIG.KCB_CONSUMER_KEY) missing.push('KCB_CONSUMER_KEY');
+    if (!CONFIG.KCB_CONSUMER_SECRET) missing.push('KCB_CONSUMER_SECRET');
+    if (!CONFIG.KCB_FT_COMPANY_CODE) missing.push('KCB_FT_COMPANY_CODE');
+    if (!CONFIG.KCB_FT_DEBIT_ACCOUNT_NUMBER) missing.push('KCB_FT_DEBIT_ACCOUNT_NUMBER');
+    if (!CONFIG.KCB_FT_CALLBACK_URL) missing.push('KCB_FT_CALLBACK_URL');
+    if (!CONFIG.KCB_FT_CALLBACK_SECRET) missing.push('KCB_FT_CALLBACK_SECRET');
+    if (CONFIG.KCB_FT_COMPANY_CODE.length > 15) throw new Error('KCB_FT_COMPANY_CODE must be 15 characters or fewer.');
+    if (!/^\d{10}$/.test(String(CONFIG.KCB_FT_DEBIT_ACCOUNT_NUMBER))) {
+        throw new Error('KCB_FT_DEBIT_ACCOUNT_NUMBER must be the 10-digit KCB debit account issued for Funds Transfer. Do not use the STK invoice reference here.');
+    }
+    if (!/^https:\/\//i.test(CONFIG.KCB_FT_CALLBACK_URL)) throw new Error('KCB_FT_CALLBACK_URL must be a public HTTPS endpoint registered with KCB.');
+    try {
+        const callbackUrl = new URL(CONFIG.KCB_FT_CALLBACK_URL);
+        if (callbackUrl.searchParams.get('kcb') !== 'ft' || callbackUrl.searchParams.get('token') !== CONFIG.KCB_FT_CALLBACK_SECRET) {
+            throw new Error('KCB_FT_CALLBACK_URL must include kcb=ft and the same token configured in KCB_FT_CALLBACK_SECRET.');
+        }
+    } catch (error) {
+        if (error && error.message && error.message.includes('KCB_FT_CALLBACK_URL')) throw error;
+        throw new Error('KCB_FT_CALLBACK_URL is invalid.');
+    }
+    if (!['MO', 'IF', 'PL', 'EF', 'RT'].includes(String(CONFIG.KCB_FT_TRANSACTION_TYPE))) {
+        throw new Error('Unsupported KCB Funds Transfer transaction type.');
+    }
+    if (missing.length) throw new Error('KCB Funds Transfer is not configured. Missing: ' + missing.join(', '));
+}
+
+function newKcbFtReference_() {
+    // The KCB FT specification requires a unique transactionReference of <=12 chars.
+    return crypto.randomBytes(6).toString('hex').toUpperCase();
+}
+
+function normalizeKcbFtPhone_(phone) {
+    const value = normalizeKenyaPhone_(phone);
+    if (!/^254[17]\d{8}$/.test(value)) throw new Error('The member profile must contain a valid Kenyan M-Pesa phone number.');
+    return value;
+}
+
+async function initiateKcbFundsTransfer_(opts) {
+    requireKcbFundsTransferConfig_();
+    const purpose = String(opts.purpose || '');
+    if (!['savings_withdrawal', 'loan_disbursement'].includes(purpose)) throw new Error('Unsupported Funds Transfer purpose.');
+    const member = opts.member || {};
+    const amount = Number(opts.amount);
+    if (!Number.isFinite(amount) || amount <= 0 || Math.round(amount * 100) !== amount * 100) throw new Error('Payout amount must be a positive KES amount with at most two decimal places.');
+    if (!member.phone_number) throw new Error('The member has no registered phone number for payout. Update the member profile before approving this payout.');
+    const phone = normalizeKcbFtPhone_(member.phone_number);
+    const reference = newKcbFtReference_();
+    const now = new Date().toISOString();
+    const row = {
+        purpose,
+        member_id: member.id,
+        withdrawal_id: opts.withdrawalId || null,
+        loan_id: opts.loanId || null,
+        amount,
+        beneficiary_phone: phone,
+        beneficiary_name: String(member.full_name || 'SND Brightlife Member').slice(0, 35),
+        debit_account_number: String(CONFIG.KCB_FT_DEBIT_ACCOUNT_NUMBER),
+        company_code: String(CONFIG.KCB_FT_COMPANY_CODE),
+        transaction_reference: reference,
+        status: 'initiating',
+        requested_by: opts.actorId || null,
+        request_payload: null,
+        response_payload: null,
+        created_at: now,
+        updated_at: now
+    };
+    const created = await supabaseRequest('POST', 'kcb_fund_transfers', row);
+    if (created.statusCode < 200 || created.statusCode >= 300 || !Array.isArray(created.data) || !created.data[0]) {
+        Logger.log('KCB FT transfer record could not be created: ' + JSON.stringify(created.data));
+        throw new Error('Could not create the payout audit record. No bank transfer was submitted. Apply the KCB Funds Transfer SQL migration and try again.');
+    }
+    const transfer = created.data[0];
+    const payload = {
+        beneficiaryDetails: row.beneficiary_name,
+        companyCode: row.company_code,
+        creditAccountNumber: phone,
+        currency: 'KES',
+        debitAccountNumber: row.debit_account_number,
+        debitAmount: amount,
+        paymentDetails: (purpose === 'savings_withdrawal' ? 'SND Brightlife savings withdrawal ' : 'SND Brightlife loan disbursement ') + reference,
+        transactionReference: reference,
+        transactionType: String(CONFIG.KCB_FT_TRANSACTION_TYPE),
+        beneficiaryBankCode: String(CONFIG.KCB_FT_BENEFICIARY_BANK_CODE)
+    };
+    await supabaseRequest('PATCH', 'kcb_fund_transfers?id=eq.' + encodeURIComponent(transfer.id), { request_payload: payload, updated_at: new Date().toISOString() });
+    let response;
+    let raw = '';
+    let body = {};
+    try {
+        const token = await getKcbAccessToken_();
+        response = await fetch(kcbBaseUrl_() + '/fundstransfer/1.0.0/api/v1/transfer', {
+            method: 'POST',
+            headers: { Authorization: 'Bearer ' + token, Accept: 'application/json', 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        raw = await response.text();
+        try { body = raw ? JSON.parse(raw) : {}; } catch (_) { body = { raw }; }
+    } catch (error) {
+        // A network timeout can happen after KCB accepted a transfer. Never auto-retry it.
+        await supabaseRequest('PATCH', 'kcb_fund_transfers?id=eq.' + encodeURIComponent(transfer.id), {
+            status: 'unknown', status_message: 'Transport error; acceptance must be reconciled with KCB before retry.',
+            response_payload: { transportError: String(error.message || error) }, updated_at: new Date().toISOString()
+        });
+        return { success: false, uncertain: true, reference, message: 'KCB transfer response could not be confirmed. The payout is marked for reconciliation; do not submit it again until its status is checked.' };
+    }
+    const statusCode = body.statusCode ?? body.StatusCode ?? body.response?.statusCode ?? '';
+    const statusMessage = body.statusMessage || body.StatusMessage || body.statusDescription || body.StatusDescription || raw || 'No response description from KCB.';
+    const accepted = response.ok && String(statusCode) === '0';
+    const stateSave = await supabaseRequest('PATCH', 'kcb_fund_transfers?id=eq.' + encodeURIComponent(transfer.id) + '&status=eq.initiating', {
+        status: accepted ? 'processing' : 'failed',
+        merchant_id: body.merchantID || body.merchantId || null,
+        retrieval_ref_number: body.retrievalRefNumber || body.retrievalReferenceNumber || null,
+        status_message: String(statusMessage).slice(0, 500),
+        response_payload: body,
+        updated_at: new Date().toISOString()
+    });
+    if (!accepted && Array.isArray(stateSave.data) && stateSave.data.length === 0) {
+        const latest = await supabaseRequest('GET', 'kcb_fund_transfers?select=status&id=eq.' + encodeURIComponent(transfer.id) + '&limit=1');
+        if (latest.statusCode === 200 && Array.isArray(latest.data) && latest.data[0] && latest.data[0].status === 'completed') {
+            return { success: true, reference, transferId: transfer.id, message: 'KCB has already confirmed this payout as successful.' };
+        }
+    }
+    if (!accepted) {
+        if (purpose === 'savings_withdrawal' && opts.withdrawalId) {
+            await supabaseRequest('PATCH', 'withdrawal_requests?id=eq.' + encodeURIComponent(opts.withdrawalId) + '&status=eq.processing', { status: 'pending', notes: 'KCB payout rejected before processing. Reference: ' + reference });
+        } else if (purpose === 'loan_disbursement' && opts.loanId) {
+            await supabaseRequest('PATCH', 'loans?id=eq.' + encodeURIComponent(opts.loanId) + '&status=eq.disbursement_pending', { status: 'pending', updated_at: new Date().toISOString() });
+        }
+        return { success: false, uncertain: false, reference, message: 'KCB rejected the Funds Transfer request (HTTP ' + response.status + ', code ' + String(statusCode) + '): ' + String(statusMessage).slice(0, 250) };
+    }
+    return { success: true, reference, transferId: transfer.id, message: 'KCB accepted the payout request. It is processing; the member balance will update only after KCB confirms the transfer.' };
+}
+
+export async function handleKcbFundsTransferCallback(payload) {
+    const body = payload && (payload.data || payload.Data || payload) || {};
+    const get = (...keys) => {
+        for (const key of keys) if (body[key] !== undefined && body[key] !== null && body[key] !== '') return body[key];
+        return null;
+    };
+    const reference = String(get('transactionReference', 'TransactionReference') || '').trim();
+    const status = String(get('transactionStatus', 'TransactionStatus') || '').trim().toUpperCase();
+    const amountRaw = get('amount', 'Amount');
+    const amount = amountRaw === null ? null : Number(amountRaw);
+    if (!reference) return { success: false, message: 'KCB FT callback has no transactionReference.' };
+    if (status === 'SUCCESS' && (amount === null || !Number.isFinite(amount))) {
+        const known = await supabaseRequest('GET', 'kcb_fund_transfers?select=id&transaction_reference=eq.' + encodeURIComponent(reference) + '&limit=1');
+        if (known.statusCode === 200 && Array.isArray(known.data) && known.data.length) await supabaseRequest('PATCH', 'kcb_fund_transfers?id=eq.' + encodeURIComponent(known.data[0].id), { status: 'reconciliation_required', status_message: 'KCB success callback did not include a valid amount; no ledger change was made.', callback_payload: payload, updated_at: new Date().toISOString() });
+        return { success: false, message: 'KCB success callback has no valid amount; marked for reconciliation.' };
+    }
+    if (!['SUCCESS', 'FAILED'].includes(status)) {
+        Logger.log('KCB FT callback has an unrecognised status: ' + JSON.stringify(payload));
+        return { success: true, accepted: true, message: 'Callback received; status requires reconciliation.' };
+    }
+    const transferResult = await supabaseRequest('GET', 'kcb_fund_transfers?select=*&transaction_reference=eq.' + encodeURIComponent(reference) + '&limit=1');
+    if (transferResult.statusCode !== 200 || !Array.isArray(transferResult.data) || !transferResult.data.length) {
+        Logger.log('Unknown KCB FT callback reference: ' + reference);
+        return { success: false, message: 'Unknown KCB Funds Transfer reference.' };
+    }
+    const transfer = transferResult.data[0];
+    if (amount !== null && Number.isFinite(amount) && Math.abs(amount - Number(transfer.amount)) > 0.009) {
+        await supabaseRequest('PATCH', 'kcb_fund_transfers?id=eq.' + encodeURIComponent(transfer.id), {
+            status: 'reconciliation_required', status_message: 'Callback amount mismatch; no ledger change was made.',
+            callback_payload: payload, updated_at: new Date().toISOString()
+        });
+        return { success: false, message: 'Callback amount mismatch; marked for reconciliation.' };
+    }
+    const rpc = await supabaseRequest('POST', 'rpc/finalize_kcb_fund_transfer', {
+        p_transaction_reference: reference,
+        p_ft_reference: get('ftReference', 'FTReference') ? String(get('ftReference', 'FTReference')) : null,
+        p_transaction_status: status,
+        p_transaction_message: String(get('transactionMessage', 'TransactionMessage') || status).slice(0, 500),
+        p_amount: amount,
+        p_callback_payload: payload
+    });
+    if (rpc.statusCode < 200 || rpc.statusCode >= 300) {
+        Logger.log('KCB FT callback finalisation failed: ' + JSON.stringify(rpc.data));
+        throw new Error('Could not atomically finalise KCB payout. It requires reconciliation.');
+    }
+    const outcome = Array.isArray(rpc.data) ? rpc.data[0] : rpc.data;
+    if (status === 'SUCCESS' && outcome && outcome.success !== false && !outcome.duplicate) {
+        const memberResult = await supabaseRequest('GET', 'members?select=id,full_name,phone_number&id=eq.' + encodeURIComponent(transfer.member_id) + '&limit=1');
+        const member = memberResult.statusCode === 200 && Array.isArray(memberResult.data) ? memberResult.data[0] : null;
+        if (member && member.phone_number) {
+            sendWhatsAppAlert(member.phone_number, (transfer.purpose === 'savings_withdrawal' ? '✅ SAVINGS WITHDRAWAL PAID' : '✅ LOAN DISBURSED') + '\nAmount: KES ' + Number(transfer.amount).toFixed(2) + '\nReference: ' + reference + '\nKCB confirms the transfer was successful.');
+        }
+        if (transfer.purpose === 'loan_disbursement' && transfer.loan_id) {
+            try {
+                const loanResult = await supabaseRequest('GET', 'loans?select=id,amount,total_repayment,repayment_due_date,guarantor1_id,guarantor2_id&id=eq.' + encodeURIComponent(transfer.loan_id) + '&limit=1');
+                const loan = loanResult.statusCode === 200 && Array.isArray(loanResult.data) ? loanResult.data[0] : null;
+                if (loan) {
+                    const refs = uniqueStrings([loan.guarantor1_id, loan.guarantor2_id]);
+                    const guarantorResults = await supabaseFetchAll(refs.map(ref => 'members?select=id,unique_member_id,id_number,full_name,email,phone_number&or=(unique_member_id.eq.' + encodeURIComponent(ref) + ',id_number.eq.' + encodeURIComponent(ref) + ')&limit=1'));
+                    guarantorResults.forEach(gr => {
+                        if (!gr || gr.statusCode !== 200 || !Array.isArray(gr.data) || !gr.data.length) return;
+                        const guarantor = gr.data[0];
+                        sendMemberNotification_(guarantor, 'SND Brightlife CBO — Loan Disbursed', '<p>The loan you guaranteed has now been successfully disbursed by KCB.</p><p><strong>Amount:</strong> KES ' + Number(loan.amount).toFixed(2) + '<br><strong>Total repayment:</strong> KES ' + Number(loan.total_repayment || loan.amount).toFixed(2) + '<br><strong>Reference:</strong> ' + escapeHtmlServer_(reference) + '</p><p>You can track repayment progress from your Guarantors menu.</p>', {returnDetails:false});
+                        if (guarantor.phone_number) sendWhatsAppAlert(guarantor.phone_number, '✅ LOAN DISBURSED\nThe loan you guaranteed has been disbursed. Amount: KES ' + Number(loan.amount).toFixed(2) + '. Track repayment progress in your SND Brightlife Guarantors menu.');
+                    });
+                }
+            } catch (notifyError) { Logger.log('KCB FT guarantor notification failed: ' + notifyError.message); }
+        }
+    }
+    return { success: true, status: status.toLowerCase(), transactionReference: reference, result: outcome || null };
+}
+
 function extractKcbStkResult_(payload) {
     const cb = payload?.Body?.stkCallback || payload?.body?.stkCallback || payload?.stkCallback || payload || {};
     const items = Array.isArray(cb?.CallbackMetadata?.Item)
@@ -2367,9 +2583,11 @@ async function initiateKcbMpesaPayment(data) {
         if (!member.phone_number) throw new Error('Your member profile does not have a phone number. Please edit your profile and save the phone number before paying with KCB M-Pesa.');
 
         const phone = normalizeKenyaPhone_(member.phone_number);
-        if (purpose === 'registration' && amount !== Number(CONFIG.REGISTRATION_FEE)) {
-            throw new Error('Registration fee must be exactly KES ' + CONFIG.REGISTRATION_FEE + '.');
+        if (purpose === 'registration') {
+            if (member.is_active || member.registration_fee_paid || member.registration_fee_status === 'approved') throw new Error('Registration fee has already been paid or approved.');
+            if (amount !== Number(CONFIG.REGISTRATION_FEE)) throw new Error('Registration fee must be exactly KES ' + CONFIG.REGISTRATION_FEE + '.');
         }
+        if (purpose === 'savings' && !member.is_active) throw new Error('Complete the KCB STK registration fee payment and admin approval before depositing savings.');
 
         if (purpose === 'loan_repayment') {
             const loanResult = await supabaseRequest(
@@ -2621,7 +2839,7 @@ async function applyKcbLoanRepayment_(payment, receipt) {
         throw new Error('Loan repayment could not be recorded; loan balance was restored.');
     }
 
-    await supabaseRequest('POST', 'transactions', {
+    const transactionInsert = await supabaseRequest('POST', 'transactions', {
         member_id: payment.member_id,
         type: 'loan_repayment',
         amount: amount,
@@ -2632,6 +2850,22 @@ async function applyKcbLoanRepayment_(payment, receipt) {
         created_by: payment.member_id,
         created_at: now
     });
+    if (transactionInsert.statusCode < 200 || transactionInsert.statusCode >= 300) {
+        Logger.log('KCB repayment transaction ledger insert needs reconciliation: ' + JSON.stringify(transactionInsert.data));
+    }
+
+    // Keep guarantors informed only after the KCB callback is confirmed and the loan ledger is updated.
+    try {
+        const guarantorRefs = uniqueStrings([loan.guarantor1_id, loan.guarantor2_id]);
+        const guarantorResults = await supabaseFetchAll(guarantorRefs.map(ref => 'members?select=id,unique_member_id,id_number,full_name,email,phone_number&or=(unique_member_id.eq.' + encodeURIComponent(ref) + ',id_number.eq.' + encodeURIComponent(ref) + ')&limit=1'));
+        guarantorResults.forEach(gr => {
+            if (!gr || gr.statusCode !== 200 || !Array.isArray(gr.data) || !gr.data.length) return;
+            const guarantor = gr.data[0];
+            const progress = '<p>A KCB M-Pesa repayment has been confirmed for the loan you guaranteed.</p><p><strong>Payment:</strong> KES ' + amount.toFixed(2) + '<br><strong>Paid so far:</strong> KES ' + newAmountPaid.toFixed(2) + ' of KES ' + total.toFixed(2) + '<br><strong>Remaining:</strong> KES ' + Math.max(0, total - newAmountPaid).toFixed(2) + '<br><strong>Status:</strong> ' + (fullyPaid ? 'Fully paid' : 'Active') + '</p>';
+            sendMemberNotification_(guarantor, 'SND Brightlife CBO — Loan Repayment Update', progress, {returnDetails:false});
+            if (guarantor.phone_number) sendWhatsAppAlert(guarantor.phone_number, '💰 LOAN REPAYMENT UPDATE\nConfirmed repayment: KES ' + amount.toFixed(2) + '\nPaid so far: KES ' + newAmountPaid.toFixed(2) + ' of KES ' + total.toFixed(2) + '\nRemaining: KES ' + Math.max(0, total - newAmountPaid).toFixed(2) + '\nStatus: ' + (fullyPaid ? 'Fully paid' : 'Active'));
+        });
+    } catch (notifyError) { Logger.log('KCB repayment guarantor notification failed: ' + notifyError.message); }
 
     return { alreadyApplied: false, fullyPaid: fullyPaid, newAmountPaid: newAmountPaid };
 }
@@ -2822,6 +3056,7 @@ async function processSavings(data) {
         }
 
         var isRegistrationPayment = !member.is_active && !member.registration_fee_paid && member.registration_fee_status !== 'approved';
+        if (isRegistrationPayment) throw new Error('Registration fees must be paid using the KCB M-Pesa STK Push. Manual M-Pesa codes are not accepted for registration.');
         if (isRegistrationPayment && Math.abs(amount - CONFIG.REGISTRATION_FEE) > 0.001) {
             throw new Error('Registration fee must be exactly KES ' + CONFIG.REGISTRATION_FEE + '.');
         }
@@ -2907,15 +3142,17 @@ async function approveRegistrationFee(data) {
             'transactions?select=*&member_id=eq.' + encodeURIComponent(memberId) + 
             '&type=eq.registration&status=eq.pending&order=created_at.desc&limit=1');
         
-        let amount = CONFIG.REGISTRATION_FEE || 500;
-        let mpesaCode = 'N/A';
-        let transactionId = null;
-        
-        if (transResult.statusCode === 200 && transResult.data && transResult.data.length > 0) {
-            amount = transResult.data[0].amount || 500;
-            mpesaCode = transResult.data[0].mpesa_code || 'N/A';
-            transactionId = transResult.data[0].id;
+        if (transResult.statusCode !== 200 || !Array.isArray(transResult.data) || !transResult.data.length) {
+            throw new Error('Cannot approve registration: no successful KCB STK Push transaction is recorded.');
         }
+        const registrationTransaction = transResult.data[0];
+        if (String(registrationTransaction.payment_method || '') !== 'kcb_mpesa' || !registrationTransaction.mpesa_code || registrationTransaction.mpesa_code === 'N/A') {
+            throw new Error('Registration fee approval requires a KCB M-Pesa STK Push receipt. Manual payment records cannot activate the account.');
+        }
+        let amount = Number(registrationTransaction.amount || CONFIG.REGISTRATION_FEE);
+        let mpesaCode = registrationTransaction.mpesa_code;
+        let transactionId = registrationTransaction.id;
+        if (Math.abs(amount - Number(CONFIG.REGISTRATION_FEE)) > 0.001) throw new Error('The recorded KCB registration receipt amount does not match the required fee.');
         
         const updateEndpoint = 'members?id=eq.' + encodeURIComponent(memberId);
         const updateData = {
@@ -3123,63 +3360,38 @@ async function rejectSavings(data) {
 
 async function approveWithdrawal(data) {
     try {
-        var withdrawalId = typeof data === 'object' ? data.withdrawalId : data;
-        var actorId = typeof data === 'object' ? data.actorId : null;
+        const withdrawalId = typeof data === 'object' ? data.withdrawalId : data;
+        const actorId = typeof data === 'object' ? data.actorId : null;
         await requirePermission(actorId, 'withdrawal_approval', undefined, data && data.sessionToken);
-        const endpoint = 'withdrawal_requests?select=*&id=eq.' + 
-                        encodeURIComponent(withdrawalId);
-        const result = await supabaseRequest('GET', endpoint);
-        
-        if (result.statusCode !== 200 || !result.data || result.data.length === 0) {
-            throw new Error('Withdrawal not found');
-        }
-        
+        requireKcbFundsTransferConfig_();
+        const result = await supabaseRequest('GET', 'withdrawal_requests?select=*&id=eq.' + encodeURIComponent(withdrawalId) + '&limit=1');
+        if (result.statusCode !== 200 || !Array.isArray(result.data) || !result.data.length) throw new Error('Withdrawal not found.');
         const withdrawal = result.data[0];
         if (withdrawal.status !== 'pending') throw new Error('This withdrawal is no longer pending.');
-        
-        const memberResult = await supabaseRequest('GET', 'members?select=id,savings_balance,full_name,phone_number&id=eq.' + encodeURIComponent(withdrawal.member_id));
-        const member = memberResult.statusCode === 200 && memberResult.data && memberResult.data.length > 0 ? memberResult.data[0] : {};
-        
-        const currentBalance = numberValue(member.savings_balance);
-        const withdrawalAmount = numberValue(withdrawal.amount);
-        if (withdrawalAmount <= 0 || withdrawalAmount > currentBalance) throw new Error('Withdrawal exceeds the member savings balance.');
-        const newBalance = Math.max(0, currentBalance - withdrawalAmount);
-        const updateEndpoint = 'members?id=eq.' + encodeURIComponent(withdrawal.member_id) + '&savings_balance=eq.' + encodeURIComponent(String(currentBalance));
-        const balanceUpdate = await supabaseRequest('PATCH', updateEndpoint, { savings_balance: newBalance });
-        if (balanceUpdate.statusCode !== 200 || !Array.isArray(balanceUpdate.data) || balanceUpdate.data.length !== 1) throw new Error('Savings balance changed while approving this withdrawal. Please refresh and retry.');
-        
-        const wEndpoint = 'withdrawal_requests?id=eq.' + encodeURIComponent(withdrawalId) + '&status=eq.pending';
-        const withdrawalUpdate = await supabaseRequest('PATCH', wEndpoint, {
-            status: 'approved',
-            approved_date: new Date().toISOString()
-        });
-        if (withdrawalUpdate.statusCode !== 200 || !Array.isArray(withdrawalUpdate.data) || withdrawalUpdate.data.length !== 1) {
-            await supabaseRequest('PATCH', 'members?id=eq.' + encodeURIComponent(withdrawal.member_id) + '&savings_balance=eq.' + encodeURIComponent(String(newBalance)), {savings_balance:currentBalance});
-            throw new Error('Withdrawal could not be finalized. The savings balance was restored.');
+        const memberResult = await supabaseRequest('GET', 'members?select=id,savings_balance,full_name,phone_number,is_active&id=eq.' + encodeURIComponent(withdrawal.member_id) + '&limit=1');
+        if (memberResult.statusCode !== 200 || !Array.isArray(memberResult.data) || !memberResult.data.length) throw new Error('Member profile not found.');
+        const member = memberResult.data[0];
+        if (!member.is_active) throw new Error('Inactive members cannot withdraw savings.');
+        const amount = Number(withdrawal.amount);
+        if (!Number.isFinite(amount) || amount <= 0 || amount > numberValue(member.savings_balance)) throw new Error('Withdrawal exceeds the member savings balance.');
+        if (!member.phone_number) throw new Error('Member has no registered mobile number for payout.');
+        normalizeKcbFtPhone_(member.phone_number);
+        const claim = await supabaseRequest('POST', 'rpc/claim_kcb_withdrawal_for_payout', { p_withdrawal_id: String(withdrawalId) });
+        if (claim.statusCode < 200 || claim.statusCode >= 300) {
+            const detail = claim.data && (claim.data.message || claim.data.details || claim.data.hint);
+            throw new Error(detail || 'This withdrawal could not be reserved safely. Refresh and check its status.');
         }
-        
-        const transEndpoint = 'transactions';
-        await supabaseRequest('POST', transEndpoint, {
-            member_id: withdrawal.member_id,
-            type: 'withdrawal',
-            amount: withdrawal.amount,
-            description: 'Withdrawal approved - KES ' + withdrawal.amount,
-            status: 'completed',
-            created_by: null,
-            created_at: new Date().toISOString()
-        });
-        
-        if (member.phone_number) {
-            sendWhatsAppAlert(
-                member.phone_number,
-                '✅ WITHDRAWAL APPROVED\n' +
-                'Dear ' + member.full_name + ',\n' +
-                'Your withdrawal of KES ' + withdrawal.amount + ' has been approved!\n' +
-                'New balance: KES ' + newBalance
-            );
+        let payout;
+        try { payout = await initiateKcbFundsTransfer_({ purpose: 'savings_withdrawal', member, amount, withdrawalId, actorId }); }
+        catch (initError) {
+            await supabaseRequest('PATCH', 'withdrawal_requests?id=eq.' + encodeURIComponent(withdrawalId) + '&status=eq.processing', { status: 'pending', notes: 'Payout was not submitted to KCB: ' + String(initError.message || initError).slice(0, 700) });
+            throw initError;
         }
-        
-        return { success: true, message: 'Withdrawal approved' };
+        if (!payout.success && !payout.uncertain) {
+            await supabaseRequest('PATCH', 'withdrawal_requests?id=eq.' + encodeURIComponent(withdrawalId) + '&status=eq.processing', { status: 'pending', notes: payout.message });
+            throw new Error(payout.message);
+        }
+        return { success: true, message: payout.message, transactionReference: payout.reference, payoutStatus: payout.uncertain ? 'reconciliation_required' : 'processing' };
     } catch (error) {
         return { success: false, message: error.message };
     }
@@ -3199,6 +3411,7 @@ async function rejectWithdrawal(data) {
         }
         
         const withdrawal = result.data[0];
+        if (withdrawal.status !== 'pending') throw new Error('Only a pending withdrawal can be rejected.');
         
         const memberResult = await supabaseRequest('GET', 'members?select=full_name,phone_number&id=eq.' + encodeURIComponent(withdrawal.member_id));
         const member = memberResult.statusCode === 200 && memberResult.data && memberResult.data.length > 0 ? memberResult.data[0] : {};
@@ -3347,80 +3560,41 @@ async function applyForLoan(data) {
 
 async function approveLoan(data) {
     try {
-        var loanId = typeof data === 'object' ? data.loanId : data;
-        var actorId = typeof data === 'object' ? data.actorId : null;
+        const loanId = typeof data === 'object' ? data.loanId : data;
+        const actorId = typeof data === 'object' ? data.actorId : null;
         await requirePermission(actorId, 'loan_approval', undefined, data && data.sessionToken);
-        const endpoint = 'loans?select=*&id=eq.' + encodeURIComponent(loanId);
-        const result = await supabaseRequest('GET', endpoint);
-        
-        if (result.statusCode !== 200 || !result.data || result.data.length === 0) {
-            throw new Error('Loan not found');
-        }
-        
+        requireKcbFundsTransferConfig_();
+        const result = await supabaseRequest('GET', 'loans?select=*&id=eq.' + encodeURIComponent(loanId) + '&limit=1');
+        if (result.statusCode !== 200 || !Array.isArray(result.data) || !result.data.length) throw new Error('Loan not found.');
         const loan = result.data[0];
-        if (loan.status !== 'pending') throw new Error('This loan is no longer pending.');
-        var guarantor1Status = String(loan.guarantor1_status || 'pending').toLowerCase();
-        var guarantor2Status = String(loan.guarantor2_status || 'pending').toLowerCase();
-        if (guarantor1Status === 'pending' || guarantor2Status === 'pending') {
-            throw new Error('Final approval is locked until both guarantors have responded.');
-        }
-        if (guarantor1Status !== 'accepted' || guarantor2Status !== 'accepted') {
-            throw new Error('This loan cannot be approved because at least one guarantor declined the guarantee.');
-        }
-        
-        const memberResult = await supabaseRequest('GET', 'members?select=id,full_name,unique_member_id,phone_number&id=eq.' + encodeURIComponent(loan.member_id));
-        const member = memberResult.statusCode === 200 && memberResult.data && memberResult.data.length > 0 ? memberResult.data[0] : {};
-        
+        if (loan.status !== 'pending') throw new Error('This loan is not awaiting final approval.');
+        const g1 = String(loan.guarantor1_status || 'pending').toLowerCase();
+        const g2 = String(loan.guarantor2_status || 'pending').toLowerCase();
+        if (g1 !== 'accepted' || g2 !== 'accepted') throw new Error('Final approval requires both guarantors to accept the guarantee.');
+        const memberResult = await supabaseRequest('GET', 'members?select=id,full_name,unique_member_id,phone_number,is_active&id=eq.' + encodeURIComponent(loan.member_id) + '&limit=1');
+        if (memberResult.statusCode !== 200 || !Array.isArray(memberResult.data) || !memberResult.data.length) throw new Error('Borrower profile not found.');
+        const member = memberResult.data[0];
+        if (!member.is_active) throw new Error('Only active members can receive loan disbursements.');
+        if (!member.phone_number) throw new Error('Borrower has no registered phone number for payout.');
+        normalizeKcbFtPhone_(member.phone_number);
+        const amount = Number(loan.amount);
+        if (!Number.isFinite(amount) || amount <= 0) throw new Error('Loan amount is invalid.');
         const approvalTime = new Date().toISOString();
-        const updateEndpoint = 'loans?id=eq.' + encodeURIComponent(loanId) + '&status=eq.pending';
-        const loanUpdate = await supabaseRequest('PATCH', updateEndpoint, {
-            status: 'active',
-            approved_date: approvalTime,
-            approved_by: actorId
+        const claim = await supabaseRequest('PATCH', 'loans?id=eq.' + encodeURIComponent(loanId) + '&status=eq.pending', {
+            status: 'disbursement_pending', approved_date: approvalTime, approved_by: actorId, updated_at: approvalTime
         });
-        if (loanUpdate.statusCode !== 200) throw new Error('Failed to approve loan. It may already have been processed.');
-        
-        const transEndpoint = 'transactions';
-        await supabaseRequest('POST', transEndpoint, {
-            member_id: loan.member_id,
-            type: 'loan_disbursement',
-            amount: loan.amount,
-            description: 'Loan approved - KES ' + loan.amount,
-            status: 'completed',
-            created_by: null,
-            created_at: new Date().toISOString()
-        });
-        
-        if (member.phone_number) {
-            sendWhatsAppAlert(
-                member.phone_number,
-                '✅ LOAN APPROVED\n' +
-                'Amount: KES ' + loan.amount + '\n' +
-                'Repayment Period: ' + loan.repayment_period + '\n' +
-                'Interest: ' + (loan.interest_rate * 100) + '%\n' +
-                'Total Repayment: KES ' + (loan.total_repayment || loan.amount * (1 + loan.interest_rate)).toFixed(2) + '\n' +
-                'Due Date: ' + formatKenyaDate_(new Date(loan.repayment_due_date))
-            );
+        if (claim.statusCode !== 200 || !Array.isArray(claim.data) || claim.data.length !== 1) throw new Error('This loan was updated by another administrator. Refresh and check its status.');
+        let payout;
+        try { payout = await initiateKcbFundsTransfer_({ purpose: 'loan_disbursement', member, amount, loanId, actorId }); }
+        catch (initError) {
+            await supabaseRequest('PATCH', 'loans?id=eq.' + encodeURIComponent(loanId) + '&status=eq.disbursement_pending', { status: 'pending', approved_date: null, approved_by: null, updated_at: new Date().toISOString() });
+            throw initError;
         }
-
-        // Keep both guarantors informed when the administrator completes the final decision.
-        try {
-            var approvedGuarantorRefs = uniqueStrings([loan.guarantor1_id, loan.guarantor2_id]);
-            var approvedGuarantors = await supabaseFetchAll(approvedGuarantorRefs.map(function(ref){
-                return 'members?select=id,unique_member_id,id_number,full_name,email,phone_number&or=(unique_member_id.eq.' + encodeURIComponent(ref) + ',id_number.eq.' + encodeURIComponent(ref) + ')&limit=1';
-            }));
-            approvedGuarantors.forEach(function(gr){
-                if (!gr || gr.statusCode !== 200 || !gr.data || !gr.data.length) return;
-                var guarantor = gr.data[0];
-                sendMemberNotification_(guarantor, 'SND Brightlife CBO — Loan Approved',
-                    '<p>The administrator has approved and disbursed the loan you guaranteed.</p><p><strong>Amount:</strong> KES ' + numberValue(loan.amount).toFixed(2) + '<br><strong>Total repayment:</strong> KES ' + numberValue(loan.total_repayment).toFixed(2) + '<br><strong>Due date:</strong> ' + escapeHtmlServer_(formatKenyaDate_(new Date(loan.repayment_due_date))) + '</p><p>You can track repayment progress from your Guarantors menu.</p>', {returnDetails:false});
-                if (guarantor.phone_number) sendWhatsAppAlert(guarantor.phone_number, '✅ LOAN GUARANTEE ACTIVE\nThe loan you guaranteed has been approved and disbursed.\nAmount: KES ' + numberValue(loan.amount).toFixed(2) + '\nTotal repayment: KES ' + numberValue(loan.total_repayment).toFixed(2) + '\nTrack repayment progress in your SND Brightlife Guarantors menu.');
-            });
-        } catch (notifyError) {
-            Logger.log('Guarantor approval notification failed: ' + notifyError.message);
+        if (!payout.success && !payout.uncertain) {
+            await supabaseRequest('PATCH', 'loans?id=eq.' + encodeURIComponent(loanId) + '&status=eq.disbursement_pending', { status: 'pending', updated_at: new Date().toISOString() });
+            throw new Error(payout.message);
         }
-        
-        return { success: true, message: 'Loan approved and disbursed' };
+        return { success: true, message: payout.message, transactionReference: payout.reference, payoutStatus: payout.uncertain ? 'reconciliation_required' : 'processing' };
     } catch (error) {
         return { success: false, message: error.message };
     }
@@ -3448,106 +3622,9 @@ async function rejectLoan(data) {
 }
 
 async function repayLoan(data) {
-    try {
-        var loanId = data && data.loanId;
-        var memberId = data && data.memberId;
-        var actorId = data && data.actorId;
-        if (String(actorId) !== String(memberId)) throw new Error('You can only repay your own loan.');
-        var amount = numberValue(data && data.amount);
-        var mpesaCode = String((data && data.mpesaCode) || '').trim().toUpperCase();
-        if (!loanId || !memberId) throw new Error('Loan and member are required');
-        if (amount <= 0) throw new Error('Enter a valid repayment amount');
-        if (!mpesaCode) throw new Error('M-Pesa confirmation code is required');
-
-        var endpoints = [
-            'loans?select=*&id=eq.' + encodeURIComponent(loanId) + '&limit=1',
-            'transactions?select=id&mpesa_code=eq.' + encodeURIComponent(mpesaCode) + '&limit=1',
-            'loan_repayments?select=id&mpesa_code=eq.' + encodeURIComponent(mpesaCode) + '&limit=1'
-        ];
-        var r = await supabaseFetchAll(endpoints);
-        if (r[0].statusCode !== 200 || !r[0].data || !r[0].data.length) throw new Error('Loan not found');
-        if ((r[1].statusCode === 200 && r[1].data && r[1].data.length) || (r[2].statusCode === 200 && r[2].data && r[2].data.length)) {
-            throw new Error('This M-Pesa confirmation code has already been used.');
-        }
-        var loan = r[0].data[0];
-        if (String(loan.member_id) !== String(memberId)) throw new Error('This loan does not belong to the logged-in member.');
-        if (loan.status !== 'active') throw new Error('Loan is not active or already completed');
-
-        var totalRepayment = numberValue(loan.total_repayment || numberValue(loan.amount) * (1 + numberValue(loan.interest_rate)));
-        var currentPaid = numberValue(loan.amount_paid);
-        var remaining = Math.max(0, totalRepayment - currentPaid);
-        if (amount > remaining) throw new Error('Payment exceeds remaining balance of KES ' + remaining.toFixed(2) + '.');
-        var newAmountPaid = currentPaid + amount;
-        var isFullyPaid = newAmountPaid >= totalRepayment - 0.001;
-        var nowIso = new Date().toISOString();
-
-        var update = await supabaseRequest('PATCH', 'loans?id=eq.' + encodeURIComponent(loanId) + '&status=eq.active&amount_paid=eq.' + encodeURIComponent(String(currentPaid)), {
-            amount_paid: newAmountPaid,
-            is_fully_paid: isFullyPaid,
-            status: isFullyPaid ? 'completed' : 'active',
-            updated_at: nowIso
-        });
-        if (update.statusCode !== 200 || !Array.isArray(update.data) || update.data.length !== 1) throw new Error('Loan balance changed while this payment was being processed. Please refresh and try again.');
-
-        var repayment = await supabaseRequest('POST', 'loan_repayments', {
-            loan_id: loanId,
-            member_id: memberId,
-            amount: amount,
-            payment_method: 'mpesa',
-            mpesa_code: mpesaCode,
-            payment_date: nowIso,
-            created_at: nowIso
-        });
-        if (repayment.statusCode !== 201) {
-            await supabaseRequest('PATCH', 'loans?id=eq.' + encodeURIComponent(loanId) + '&amount_paid=eq.' + encodeURIComponent(String(newAmountPaid)), {amount_paid:currentPaid,is_fully_paid:false,status:'active',updated_at:new Date().toISOString()});
-            throw new Error('Repayment could not be recorded. No balance was retained for this payment. Please retry.');
-        }
-
-        var trans = await supabaseRequest('POST', 'transactions', {
-            member_id: memberId,
-            type: 'loan_repayment',
-            amount: amount,
-            payment_method: 'mpesa',
-            mpesa_code: mpesaCode,
-            description: 'Loan repayment',
-            status: 'completed',
-            created_by: memberId,
-            created_at: nowIso
-        });
-        if (trans.statusCode !== 201) Logger.log('Warning: repayment transaction ledger insert failed: ' + JSON.stringify(trans));
-
-        // Keep both guarantors informed of repayment progress after every recorded payment.
-        try {
-            var guarantorRefs = uniqueStrings([loan.guarantor1_id, loan.guarantor2_id]);
-            if (guarantorRefs.length) {
-                var gNotify = await supabaseFetchAll(guarantorRefs.map(function(ref){
-                    return 'members?select=id,unique_member_id,id_number,full_name,email,phone_number&or=(unique_member_id.eq.' + encodeURIComponent(ref) + ',id_number.eq.' + encodeURIComponent(ref) + ')&limit=1';
-                }));
-                var progressMessage = '💰 LOAN REPAYMENT UPDATE\n' +
-                    'Borrower loan has received a repayment of KES ' + amount.toFixed(2) + '.\n' +
-                    'Paid so far: KES ' + newAmountPaid.toFixed(2) + ' of KES ' + totalRepayment.toFixed(2) + '.\n' +
-                    'Remaining: KES ' + Math.max(0, totalRepayment - newAmountPaid).toFixed(2) + '\n' +
-                    'Status: ' + (isFullyPaid ? 'Fully paid' : 'Active');
-                gNotify.forEach(function(gr){
-                    if (!gr || gr.statusCode !== 200 || !gr.data || !gr.data.length) return;
-                    var guarantor = gr.data[0];
-                    sendMemberNotification_(guarantor, 'SND Brightlife CBO — Loan Repayment Update',
-                        '<p>A repayment has been recorded on the loan you guaranteed.</p><p><strong>Paid so far:</strong> KES ' + newAmountPaid.toFixed(2) + '<br><strong>Total repayment:</strong> KES ' + totalRepayment.toFixed(2) + '<br><strong>Remaining:</strong> KES ' + Math.max(0, totalRepayment - newAmountPaid).toFixed(2) + '<br><strong>Status:</strong> ' + (isFullyPaid ? 'Fully paid' : 'Active') + '</p>', {returnDetails:false});
-                    if (guarantor.phone_number) sendWhatsAppAlert(guarantor.phone_number, progressMessage);
-                });
-            }
-        } catch (notifyError) {
-            Logger.log('Guarantor repayment notification failed: ' + notifyError.message);
-        }
-
-        return {
-            success: true,
-            message: 'Repayment of KES ' + amount.toFixed(2) + ' recorded. ' +
-                (isFullyPaid ? 'Loan fully paid!' : 'Remaining: KES ' + (totalRepayment - newAmountPaid).toFixed(2))
-        };
-    } catch (error) {
-        return { success: false, message: error.message };
-    }
+    // The only supported member repayment path is initiateKcbMpesaPayment(purpose='loan_repayment').
+    // Do not accept a typed receipt code as proof of payment.
+    return { success: false, message: 'Loan repayments must be made through KCB M-Pesa STK Push. Open the loan repayment screen and choose Pay with KCB M-Pesa.' };
 }
 
 async function requestWithdrawal(data) {
@@ -3555,7 +3632,7 @@ async function requestWithdrawal(data) {
         const memberId = data && data.memberId;
         const actorId = data && data.actorId;
         if (String(actorId) !== String(memberId)) throw new Error('You can only request a withdrawal for your own member account.');
-        const endpoint = 'members?select=savings_balance,full_name,is_active,registration_fee_amount,registration_fee_paid&id=eq.' + 
+        const endpoint = 'members?select=savings_balance,full_name,phone_number,is_active,registration_fee_amount,registration_fee_paid&id=eq.' + 
                         encodeURIComponent(data.memberId);
         const result = await supabaseRequest('GET', endpoint);
         
@@ -3569,7 +3646,7 @@ async function requestWithdrawal(data) {
             throw new Error('Account is inactive. Pay registration fee to activate.');
         }
         
-        const pendingWithdrawalsResult = await supabaseRequest('GET', 'withdrawal_requests?select=amount&member_id=eq.' + encodeURIComponent(data.memberId) + '&status=eq.pending&limit=500');
+        const pendingWithdrawalsResult = await supabaseRequest('GET', 'withdrawal_requests?select=amount&member_id=eq.' + encodeURIComponent(data.memberId) + '&status=in.(pending,processing,approved)&limit=500');
         const pendingReserved = pendingWithdrawalsResult.statusCode === 200 && Array.isArray(pendingWithdrawalsResult.data) ? pendingWithdrawalsResult.data.reduce(function(sum,w){return sum+numberValue(w.amount);},0) : 0;
         const withdrawableBalance = Math.max(0, numberValue(member.savings_balance) - pendingReserved);
         
@@ -3585,7 +3662,7 @@ async function requestWithdrawal(data) {
         await supabaseRequest('POST', wEndpoint, {
             member_id: data.memberId,
             amount: data.amount,
-            phone: data.phone || '',
+            phone: member.phone_number || '',
             status: 'pending',
             request_date: new Date().toISOString(),
             created_at: new Date().toISOString()
@@ -3599,7 +3676,7 @@ async function requestWithdrawal(data) {
                     '🏦 WITHDRAWAL REQUEST\n' +
                     'Member: ' + member.full_name + '\n' +
                     'Amount: KES ' + data.amount + '\n' +
-                    'Phone: ' + (data.phone || 'N/A') + '\n' +
+                    'Phone: ' + (member.phone_number || 'N/A') + '\n' +
                     'Withdrawable Balance: KES ' + withdrawableBalance
                 );
             });
@@ -3633,7 +3710,8 @@ async function getAdminDashboard(data) {
             'biodata_approvals?select=*&order=created_at.desc&limit=5000',
             'loans?select=*&status=eq.active&order=repayment_due_date.asc&limit=5000',
             'loan_repayments?select=*&order=payment_date.desc&limit=100',
-            'members?select=id,unique_member_id,full_name,id_number,phone_number,email,role,registration_fee_paid,registration_fee_status,registration_fee_amount,is_active,biodata_completed,biodata_locked,savings_balance,withdrawal_fee,profile_edit_status,occupation,address,next_of_kin,next_of_kin_phone,next_of_kin_relation,account_age_months,loan_limit,loan_growth_score,loan_growth_tier,loan_growth_evaluation,loan_growth_last_evaluated,total_loans_taken,total_loans_completed,total_loans_defaulted,on_time_repayments,late_repayments,total_savings_contributed,savings_consistency_score,permissions,registration_date,created_at,updated_at&order=created_at.desc&limit=5000'
+            'members?select=id,unique_member_id,full_name,id_number,phone_number,email,role,registration_fee_paid,registration_fee_status,registration_fee_amount,is_active,biodata_completed,biodata_locked,savings_balance,withdrawal_fee,profile_edit_status,occupation,address,next_of_kin,next_of_kin_phone,next_of_kin_relation,account_age_months,loan_limit,loan_growth_score,loan_growth_tier,loan_growth_evaluation,loan_growth_last_evaluated,total_loans_taken,total_loans_completed,total_loans_defaulted,on_time_repayments,late_repayments,total_savings_contributed,savings_consistency_score,permissions,registration_date,created_at,updated_at&order=created_at.desc&limit=5000',
+            'kcb_fund_transfers?select=id,purpose,member_id,amount,beneficiary_phone,transaction_reference,status,status_message,ft_reference,created_at,updated_at&status=in.(initiating,processing,unknown,reconciliation_required)&order=created_at.desc&limit=100'
         ];
         var r = await supabaseFetchAll(endpoints);
         function arr(i) { return r[i] && r[i].statusCode === 200 && Array.isArray(r[i].data) ? r[i].data : []; }
@@ -3644,6 +3722,7 @@ async function getAdminDashboard(data) {
         var allProfileEdits = arr(4);
         var activeLoans = arr(5);
         var recentRepayments = arr(6);
+        var processingPayouts = arr(8);
 
         // Build a reliable member lookup and attach member summaries locally.
         // This keeps approval queues working even when Supabase relationship
@@ -3666,6 +3745,7 @@ async function getAdminDashboard(data) {
         allProfileEdits.forEach(function(e) { if (!e.members) e.members = memberSummary(e.member_id); });
         activeLoans.forEach(function(l) { if (!l.members) l.members = memberSummary(l.member_id); });
         recentRepayments.forEach(function(r) { if (!r.members) r.members = memberSummary(r.member_id); });
+        processingPayouts.forEach(function(p) { if (!p.members) p.members = memberSummary(p.member_id); });
 
         function pending(v) { return String(v || '').trim().toLowerCase() === 'pending'; }
         var pendingTransactions = allTransactions.filter(function(t) { return pending(t.status); });
@@ -3699,7 +3779,7 @@ async function getAdminDashboard(data) {
         stats.pendingWithdrawals = pendingWithdrawals.length;
         stats.pendingProfileEdits = pendingProfileEdits.length;
 
-        return {success:true,pendingRegistrations:pendingRegistrations,pendingTransactions:pendingTransactions,pendingLoans:pendingLoans,pendingWithdrawals:pendingWithdrawals,pendingProfileEdits:pendingProfileEdits,activeLoans:activeLoans,recentRepayments:recentRepayments,allMembers:allMembers,stats:stats};
+        return {success:true,pendingRegistrations:pendingRegistrations,pendingTransactions:pendingTransactions,pendingLoans:pendingLoans,pendingWithdrawals:pendingWithdrawals,pendingProfileEdits:pendingProfileEdits,activeLoans:activeLoans,recentRepayments:recentRepayments,processingPayouts:processingPayouts,allMembers:allMembers,stats:stats};
     } catch (error) {
         Logger.log('Error in getAdminDashboard: ' + error.message);
         return {success:false,message:error.message};
@@ -4498,11 +4578,14 @@ async function activateMember(data) {
         const memberId = typeof data === 'object' ? data.memberId : data;
         const actorId = typeof data === 'object' ? data.actorId : null;
         await requirePermission(actorId, 'view_members', undefined, data && data.sessionToken);
+        const memberCheck = await supabaseRequest('GET', 'members?select=id,is_active,registration_fee_paid,registration_fee_status&id=eq.' + encodeURIComponent(memberId) + '&limit=1');
+        if (memberCheck.statusCode !== 200 || !Array.isArray(memberCheck.data) || !memberCheck.data.length) throw new Error('Member not found.');
+        const checkedMember = memberCheck.data[0];
+        if (!checkedMember.registration_fee_paid || String(checkedMember.registration_fee_status || '').toLowerCase() !== 'approved') {
+            throw new Error('Members can only be activated after their KCB STK registration fee receipt has been reviewed and approved in Registration Fee Approvals.');
+        }
         const endpoint = 'members?id=eq.' + encodeURIComponent(memberId);
-        const result = await supabaseRequest('PATCH', endpoint, { 
-            is_active: true,
-            registration_fee_paid: true
-        });
+        const result = await supabaseRequest('PATCH', endpoint, { is_active: true });
         
         if (result.statusCode !== 200) {
             throw new Error('Failed to activate member');
@@ -7073,6 +7156,25 @@ async function handler(req,res){
     } catch(e) {
       Logger.log('KCB IPN error: ' + (e.stack || e.message));
       return res.status(500).json({transactionID:crypto.randomUUID(),statusCode:1,statusMessage:e.message || 'IPN processing failed.'});
+    }
+  }
+
+  if (kcbRoute === 'ft') {
+    if (req.method !== 'POST') return res.status(405).json({ success: false, message: 'Method not allowed.' });
+    // The supplied FT spec does not define a callback signature. Use a high-entropy
+    // shared URL token and register this exact URL with KCB; never accept an unsigned callback.
+    const expectedFtCallbackSecret = Buffer.from(String(CONFIG.KCB_FT_CALLBACK_SECRET || ''), 'utf8');
+    const receivedFtCallbackSecret = Buffer.from(String(requestUrl.searchParams.get('token') || ''), 'utf8');
+    if (!expectedFtCallbackSecret.length || receivedFtCallbackSecret.length !== expectedFtCallbackSecret.length || !crypto.timingSafeEqual(receivedFtCallbackSecret, expectedFtCallbackSecret)) {
+      return res.status(401).json({ success: false, message: 'Unauthorised KCB Funds Transfer callback.' });
+    }
+    try {
+      const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
+      const result = await handleKcbFundsTransferCallback(body);
+      return res.status(200).json(result);
+    } catch (e) {
+      Logger.log('KCB Funds Transfer callback error: ' + (e.stack || e.message));
+      return res.status(500).json({ success: false, message: e.message || 'Funds Transfer callback processing failed.' });
     }
   }
 
