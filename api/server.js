@@ -15,8 +15,12 @@ const CONFIG = {
   KCB_BASE_URL: process.env.KCB_BASE_URL || 'https://uat.buni.kcbgroup.com',
   KCB_CONSUMER_KEY: process.env.KCB_CONSUMER_KEY || '',
   KCB_CONSUMER_SECRET: process.env.KCB_CONSUMER_SECRET || '',
-  KCB_ACCOUNT_NUMBER: process.env.KCB_ACCOUNT_NUMBER || '',
-  KCB_SHARED_SHORT_CODE: process.env.KCB_SHARED_SHORT_CODE || '522522',
+  // From the supplied KCB STK Push specification: KCB shared paybill is 522533.
+  // Keep organisation shortcode/passkey separate because both are optional in the spec.
+  // 522522 was used by an earlier incorrect configuration. The supplied
+  // KCB STK specification identifies 522533 as the shared KCB paybill.
+  KCB_SHARED_SHORT_CODE: process.env.KCB_SHARED_SHORT_CODE === '522522' ? '522533' : (process.env.KCB_SHARED_SHORT_CODE || '522533'),
+  KCB_ORG_SHORT_CODE: process.env.KCB_ORG_SHORT_CODE || '',
   KCB_ORG_PASSKEY: process.env.KCB_ORG_PASSKEY || '',
   KCB_CALLBACK_URL: process.env.KCB_CALLBACK_URL || '',
   KCB_IPN_URL: process.env.KCB_IPN_URL || '',
@@ -2194,7 +2198,20 @@ function requireKcbConfig_() {
     if (!CONFIG.KCB_CONSUMER_KEY) missing.push('KCB_CONSUMER_KEY');
     if (!CONFIG.KCB_CONSUMER_SECRET) missing.push('KCB_CONSUMER_SECRET');
     if (!CONFIG.KCB_CALLBACK_URL) missing.push('KCB_CALLBACK_URL');
-    if (!CONFIG.KCB_ACCOUNT_NUMBER) missing.push('KCB_ACCOUNT_NUMBER');
+    if (!CONFIG.KCB_SHARED_SHORT_CODE) missing.push('KCB_SHARED_SHORT_CODE');
+
+    if (String(CONFIG.KCB_CALLBACK_URL).length > 50) {
+        throw new Error('KCB_CALLBACK_URL must be 50 characters or fewer according to the KCB STK Push specification.');
+    }
+    if (String(CONFIG.KCB_SHARED_SHORT_CODE).length > 30) {
+        throw new Error('KCB_SHARED_SHORT_CODE must be 30 characters or fewer.');
+    }
+    if (String(CONFIG.KCB_ORG_SHORT_CODE || '').length > 30) {
+        throw new Error('KCB_ORG_SHORT_CODE must be 30 characters or fewer.');
+    }
+    if (String(CONFIG.KCB_ORG_PASSKEY || '').length > 30) {
+        throw new Error('KCB_ORG_PASSKEY must be 30 characters or fewer.');
+    }
     if (missing.length) {
         throw new Error('KCB is not configured. Missing: ' + missing.join(', '));
     }
@@ -2209,11 +2226,13 @@ function normalizeKenyaPhone_(phone) {
 }
 
 function kcbInvoiceNumber_() {
-    // BUNI accepts the KCB account number or a unique order reference.
-    // Keep the reference <= 30 characters and unique for reconciliation.
-    const account = String(CONFIG.KCB_ACCOUNT_NUMBER || '').replace(/\D/g, '');
-    const suffix = 'BL' + Date.now().toString(36).toUpperCase() + crypto.randomBytes(3).toString('hex').toUpperCase();
-    const reference = account ? (account + '-' + suffix) : suffix;
+    // The supplied KCB STK Push specification requires:
+    // KCBTILLNO-YOURACCREF (max 30 characters).
+    // For the documented KCB paybill 522533 this becomes, for example:
+    // 522533-BL26ABC123XYZ.
+    const shortCode = String(CONFIG.KCB_SHARED_SHORT_CODE || '522533').trim();
+    const suffix = 'BL' + Date.now().toString(36).toUpperCase() + crypto.randomBytes(4).toString('hex').toUpperCase();
+    const reference = shortCode + '-' + suffix;
     return reference.slice(0, 30);
 }
 
@@ -2370,15 +2389,20 @@ async function initiateKcbMpesaPayment(data) {
         const callbackUrl = CONFIG.KCB_CALLBACK_URL;
         const token = await getKcbAccessToken_();
 
+        const transactionDescription = String(CONFIG.KCB_TRANSACTION_DESCRIPTION || 'Brightlife').trim().slice(0, 30);
         const payload = {
             phoneNumber: phone,
             amount: String(amount),
             invoiceNumber: invoiceNumber,
             sharedShortCode: true,
-            orgShortCode: String(CONFIG.KCB_SHARED_SHORT_CODE || '522522'),
+            // The KCB specification marks orgShortCode/orgPassKey as optional.
+            // Do not send the KCB shared paybill as orgShortCode: that field is
+            // for an organisation's own shortcode and was the cause of the
+            // previous "Merchant does not exist" configuration mismatch.
+            orgShortCode: String(CONFIG.KCB_ORG_SHORT_CODE || ''),
             orgPassKey: String(CONFIG.KCB_ORG_PASSKEY || ''),
             callbackUrl: callbackUrl,
-            transactionDescription: String(CONFIG.KCB_TRANSACTION_DESCRIPTION || 'Brightlife').slice(0, 13)
+            transactionDescription: transactionDescription
         };
 
         const response = await fetch(kcbBaseUrl_() + '/mm/api/request/1.0.0/stkpush', {
@@ -7022,7 +7046,7 @@ async function handler(req,res){
   if (kcbRoute === 'health') {
     return res.status(200).json({
       success: true,
-      kcbConfigured: Boolean(CONFIG.KCB_CONSUMER_KEY && CONFIG.KCB_CONSUMER_SECRET && CONFIG.KCB_CALLBACK_URL && CONFIG.KCB_ACCOUNT_NUMBER),
+      kcbConfigured: Boolean(CONFIG.KCB_CONSUMER_KEY && CONFIG.KCB_CONSUMER_SECRET && CONFIG.KCB_CALLBACK_URL && CONFIG.KCB_SHARED_SHORT_CODE),
       callbackUrlConfigured: Boolean(CONFIG.KCB_CALLBACK_URL),
       ipnUrlConfigured: Boolean(CONFIG.KCB_IPN_URL)
     });
