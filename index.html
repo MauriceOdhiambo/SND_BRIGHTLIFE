@@ -6174,9 +6174,62 @@ function updateUserInfo(member) {
             return map && map[key] ? String(map[key].title||fallback||'') : String(fallback||'');
         }
 
+        function normalizePublicImageUrl(value){
+            var url=String(value||'').trim();
+            if(!/^https?:\/\//i.test(url)) return '';
+            try{
+                var parsed=new URL(url);
+                var host=parsed.hostname.toLowerCase();
+                // Convert common Google Drive share links into an image-serving URL.
+                if(host==='drive.google.com' || host==='docs.google.com'){
+                    var fileMatch=parsed.pathname.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+                    var id=fileMatch&&fileMatch[1] ? fileMatch[1] : parsed.searchParams.get('id');
+                    if(id) return 'https://drive.google.com/uc?export=view&id='+encodeURIComponent(id);
+                }
+                // Dropbox share URLs should use the raw-content host when possible.
+                if(host==='www.dropbox.com' || host==='dropbox.com'){
+                    parsed.hostname='dl.dropboxusercontent.com';
+                    parsed.searchParams.delete('dl');
+                    parsed.searchParams.delete('raw');
+                    return parsed.toString();
+                }
+                return parsed.toString();
+            }catch(e){ return ''; }
+        }
         function publicContentImage(map,key){
             var url=map && map[key] ? String(map[key].image_url||'').trim() : '';
-            return /^https?:\/\//i.test(url) ? url : '';
+            return normalizePublicImageUrl(url);
+        }
+        function updateContentPhotoPreview(key){
+            var input=document.getElementById('contentPhoto_'+key);
+            var preview=document.getElementById('contentPhotoPreview_'+key);
+            var message=document.getElementById('contentPhotoMessage_'+key);
+            if(!input||!preview||!message)return;
+            var url=normalizePublicImageUrl(input.value);
+            preview.onload=function(){preview.style.display='block';message.textContent='Photo link works in preview.';message.style.color='#16803c';};
+            preview.onerror=function(){preview.style.display='none';message.textContent=input.value.trim()?'Image could not be loaded. Use a direct, publicly accessible image URL.':'Paste a direct photo link to preview it here.';message.style.color=input.value.trim()?'#b45309':'#64748b';};
+            if(url){preview.style.display='block';preview.src=url;}else{preview.removeAttribute('src');preview.style.display='none';message.textContent='Paste a direct photo link to preview it here.';message.style.color='#64748b';}
+        }
+        async function applyManagedHomepagePhotos(){
+            try{
+                var map=await getPublicContentMap(['home_hero','home_about','home_feature']);
+                var targets=[
+                    ['home_hero','#public-home .reference-hero'],
+                    ['home_about','#public-home .reference-focus-section'],
+                    ['home_feature','#public-home #public-projects']
+                ];
+                targets.forEach(function(pair){
+                    var url=publicContentImage(map,pair[0]);
+                    var target=document.querySelector(pair[1]);
+                    if(!url||!target)return;
+                    var gradient=pair[0]==='home_about'
+                        ? 'linear-gradient(90deg,rgba(255,255,255,.96),rgba(255,255,255,.78))'
+                        : 'linear-gradient(90deg,rgba(7,18,36,.88),rgba(7,18,36,.52))';
+                    target.style.setProperty('background-image',gradient+',url("'+url.replace(/"/g,'%22')+'")','important');
+                    target.style.setProperty('background-size','cover','important');
+                    target.style.setProperty('background-position','center','important');
+                });
+            }catch(e){console.warn('Managed homepage photos could not be applied:',e);}
         }
 
         function toggleBrightlifeHomeMenu(event){
@@ -6284,6 +6337,7 @@ function updateUserInfo(member) {
                         <div class="reference-footer-line"></div><b>SAVE&nbsp; • &nbsp;LEARN&nbsp; • &nbsp;BUILD&nbsp; • &nbsp;EMPOWER&nbsp; • &nbsp;GROW</b>
                     </footer>
                 </div>`;
+            applyManagedHomepagePhotos();
             window.scrollTo({top:0,behavior:'auto'});
         }
         if(!document.getElementById('brightlifeProjectCardStyles')){var st=document.createElement('style');st.id='brightlifeProjectCardStyles';st.textContent='.project-card{cursor:pointer;position:relative;transition:transform .18s ease,box-shadow .18s ease}.project-card:hover{transform:translateY(-3px)}.project-card:focus-visible{outline:3px solid rgba(108,60,225,.35);outline-offset:3px}.project-card-link{margin-top:13px;font-size:12px;font-weight:800;color:var(--primary);text-decoration:underline;text-underline-offset:3px;display:inline-block}';document.head.appendChild(st);}
@@ -11144,6 +11198,7 @@ html+=`<div class="section-card" id="reportFilters"><div class="section-title"><
 
                     <footer class="public-main-footer"><div class="public-footer-brand"><strong>SND Brightlife CBO</strong><span>Members’ Table Banking &amp; Revolving Fund</span></div><div class="public-footer-links"><button onclick="scrollPublicSection('public-home','home')">Home</button><button onclick="showBrightlifeInnerPage('about')">About Us</button><button onclick="showBrightlifeInnerPage('programs')">Our Programmes</button><button onclick="showBrightlifeInnerPage('finance')">Financial Empowerment</button><button onclick="showBrightlifeInnerPage('membership')">Membership</button><button onclick="showBrightlifeInnerPage('projects')">Projects</button><button onclick="showBrightlifeInnerPage('partner')">Partner With Us</button><button onclick="showBrightlifeInnerPage('contact')">Contact Us</button></div><p>Loans and financial services are available only to eligible members and are subject to the Fund’s rules, approval requirements and availability of funds.</p><span class="public-footer-copy">Empowering People. Building Livelihoods. Transforming Communities.</span></footer>
                 </div>`;
+            applyManagedHomepagePhotos();
             window.scrollTo({top:0,behavior:'auto'});
         }
         function showPublicLoanTerms() {
@@ -11346,14 +11401,15 @@ html+=`<div class="section-card" id="reportFilters"><div class="section-title"><
                     ['training','Training & Capacity Building','Seminars, workshops, community training, lessons and photos.']
                 ];
                 var html='<div class="dashboard-body"><div class="welcome-hero"><div><div class="welcome-kicker">Authorized Personnel</div><div class="welcome-title">CBO Content Management</div><div class="welcome-sub">Publish clear, factual updates for members and the public. Financial records remain separate from this area.</div></div></div><div class="site-grid">';
-                sections.forEach(function(sec){var r=byKey[sec[0]]||{};html+='<div class="section-card content-editor-card" style="grid-column:1/-1"><div class="section-title"><i class="fas fa-pen-to-square"></i> '+escapeHtml(sec[1])+'</div><p style="font-size:11px;color:var(--gray-500);margin:0 0 14px">'+escapeHtml(sec[2])+'</p><div class="content-editor-grid"><div class="form-group"><label>Title / Heading</label><input class="form-control" id="contentTitle_'+sec[0]+'" value="'+escapeHtml(r.title||'')+'" placeholder="Enter title"></div><div class="form-group"><label>Photo URL (optional)</label><input class="form-control" id="contentPhoto_'+sec[0]+'" value="'+escapeHtml(r.image_url||'')+'" placeholder="https://..."></div><div class="form-group" style="grid-column:1/-1"><label>Notes / Description</label><textarea class="form-control" id="contentBody_'+sec[0]+'" rows="4" placeholder="Write the approved update…">'+escapeHtml(r.body||'')+'</textarea></div></div><div style="display:flex;justify-content:flex-end;margin-top:12px"><button class="btn-primary" onclick="saveSiteContent(&quot;'+sec[0]+'&quot;)"><i class="fas fa-cloud-arrow-up"></i> Save & Publish</button></div></div>';});
+                sections.forEach(function(sec){var r=byKey[sec[0]]||{};html+='<div class="section-card content-editor-card" style="grid-column:1/-1"><div class="section-title"><i class="fas fa-pen-to-square"></i> '+escapeHtml(sec[1])+'</div><p style="font-size:11px;color:var(--gray-500);margin:0 0 14px">'+escapeHtml(sec[2])+'</p><div class="content-editor-grid"><div class="form-group"><label>Title / Heading</label><input class="form-control" id="contentTitle_'+sec[0]+'" value="'+escapeHtml(r.title||'')+'" placeholder="Enter title"></div><div class="form-group"><label>Photo URL (optional)</label><input class="form-control" id="contentPhoto_'+sec[0]+'" value="'+escapeHtml(r.image_url||'')+'" placeholder="https://..." oninput="updateContentPhotoPreview(&quot;'+sec[0]+'&quot;)"><small style="display:block;margin-top:6px;color:var(--gray-500)">Use a direct, publicly accessible image link (JPG, PNG or WebP). Google Drive share links are converted where possible.</small><img id="contentPhotoPreview_'+sec[0]+'" alt="Photo preview" style="display:none;width:100%;max-width:360px;max-height:190px;object-fit:cover;border-radius:10px;margin-top:10px;border:1px solid #dbe3ec"><small id="contentPhotoMessage_'+sec[0]+'" style="display:block;margin-top:5px;color:#64748b">Paste a direct photo link to preview it here.</small></div><div class="form-group" style="grid-column:1/-1"><label>Notes / Description</label><textarea class="form-control" id="contentBody_'+sec[0]+'" rows="4" placeholder="Write the approved update…">'+escapeHtml(r.body||'')+'</textarea></div></div><div style="display:flex;justify-content:flex-end;margin-top:12px"><button class="btn-primary" onclick="saveSiteContent(&quot;'+sec[0]+'&quot;)"><i class="fas fa-cloud-arrow-up"></i> Save & Publish</button></div></div>';});
                 html+='</div></div>';el.innerHTML=html;
+                sections.forEach(function(sec){updateContentPhotoPreview(sec[0]);});
             }catch(e){el.innerHTML='<div class="dashboard-body"><div class="section-card"><div class="alert alert-error">'+escapeHtml(e.message||'Unable to load content manager.')+'</div></div></div>';}
         }
         async function saveSiteContent(key){
             var memberId=getCanonicalMemberId();if(!memberId)return;
-            var payload={memberId:memberId,actorId:memberId,sessionToken:sessionStorage.getItem('brightlifeSessionToken')||'',contentKey:key,title:(document.getElementById('contentTitle_'+key)||{}).value||'',body:(document.getElementById('contentBody_'+key)||{}).value||'',imageUrl:(document.getElementById('contentPhoto_'+key)||{}).value||''};
-            try{var r=await callServer('saveSiteContent',payload,{force:true});if(!r||!r.success)throw new Error(r&&r.message||'Could not save content.');showToast('Content published successfully.','success');}catch(e){showToast(e.message||'Unable to save content.','error');}
+            var payload={memberId:memberId,actorId:memberId,sessionToken:sessionStorage.getItem('brightlifeSessionToken')||'',contentKey:key,title:(document.getElementById('contentTitle_'+key)||{}).value||'',body:(document.getElementById('contentBody_'+key)||{}).value||'',imageUrl:normalizePublicImageUrl((document.getElementById('contentPhoto_'+key)||{}).value||'')||((document.getElementById('contentPhoto_'+key)||{}).value||'').trim()};
+            try{var r=await callServer('saveSiteContent',payload,{force:true});if(!r||!r.success)throw new Error(r&&r.message||'Could not save content.');showToast('Content published successfully.','success');await loadContentManagementPage();}catch(e){showToast(e.message||'Unable to save content.','error');}
         }
 
         async function logout() {
