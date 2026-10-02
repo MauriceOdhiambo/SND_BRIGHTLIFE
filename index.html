@@ -6200,14 +6200,44 @@ function updateUserInfo(member) {
             var url=map && map[key] ? String(map[key].image_url||'').trim() : '';
             return normalizePublicImageUrl(url);
         }
+
+        /* Built-in project photos are included with the website as the initial
+           gallery. Administrators can replace any of them at any time by
+           publishing a new Photo URL from Content Management. */
+        var SND_PROJECT_DEFAULT_IMAGES={
+            water:'project-images/water.jpg',
+            poultry:'project-images/poultry.jpg',
+            agriculture:'project-images/agriculture.jpg',
+            bike_skills:'project-images/bike_skills.jpg',
+            education:'project-images/education.jpg',
+            entrepreneurship:'project-images/entrepreneurship.jpg',
+            women:'project-images/women.jpg',
+            youth:'project-images/youth.jpg',
+            community_development:'project-images/community_development.jpg',
+            other:'project-images/other.jpg'
+        };
+        function projectImageUrl(map,key){
+            var managed=publicContentImage(map,key);
+            return managed || SND_PROJECT_DEFAULT_IMAGES[key] || '';
+        }
+
         function updateContentPhotoPreview(key){
             var input=document.getElementById('contentPhoto_'+key);
             var preview=document.getElementById('contentPhotoPreview_'+key);
             var message=document.getElementById('contentPhotoMessage_'+key);
             if(!input||!preview||!message)return;
-            var url=normalizePublicImageUrl(input.value);
-            preview.onload=function(){preview.style.display='block';message.textContent='Photo link works in preview.';message.style.color='#16803c';};
-            preview.onerror=function(){preview.style.display='none';message.textContent=input.value.trim()?'Image could not be loaded. Use a direct, publicly accessible image URL.':'Paste a direct photo link to preview it here.';message.style.color=input.value.trim()?'#b45309':'#64748b';};
+            var entered=normalizePublicImageUrl(input.value);
+            var url=entered || SND_PROJECT_DEFAULT_IMAGES[key] || '';
+            preview.onload=function(){
+                preview.style.display='block';
+                message.textContent=entered ? 'Photo link works in preview.' : (SND_PROJECT_DEFAULT_IMAGES[key] ? 'Built-in project photo. Paste a new URL to replace it.' : 'Paste a direct photo link to preview it here.');
+                message.style.color=entered?'#16803c':'#64748b';
+            };
+            preview.onerror=function(){
+                preview.style.display='none';
+                message.textContent=input.value.trim()?'Image could not be loaded. Use a direct, publicly accessible image URL.':'No default photo available. Paste a direct photo link to preview it here.';
+                message.style.color=input.value.trim()?'#b45309':'#64748b';
+            };
             if(url){preview.style.display='block';preview.src=url;}else{preview.removeAttribute('src');preview.style.display='none';message.textContent='Paste a direct photo link to preview it here.';message.style.color='#64748b';}
         }
         async function applyManagedHomepagePhotos(){
@@ -6389,7 +6419,7 @@ if(!document.getElementById('brightlifeProjectsPublicHeaderStyles')){var st=docu
             </div>`;
             const cards=document.getElementById('brightlifeProjectCards'); if(!cards)return;
             cards.innerHTML=projects.map(function(p){
-                var title=publicContentTitle(map,p[0],p[3]); var body=publicContentText(map,p[0],p[4]); var image=publicContentImage(map,p[0]);
+                var title=publicContentTitle(map,p[0],p[3]); var body=publicContentText(map,p[0],p[4]); var image=projectImageUrl(map,p[0]);
                 var imageHtml=image?`<div class="project-card-image"><img src="${String(image).replace(/"/g,'&quot;')}" alt="${escapeHtml(title)}"></div>`:`<div class="project-card-image"><div class="project-card-icon"><i class="fas ${p[2]}"></i></div></div>`;
                 return `<article class="brightlife-project-card">${imageHtml}<div class="project-card-body"><h3>${escapeHtml(title)}</h3><p>${escapeHtml(body)}</p><button type="button" class="project-view-btn" onclick="showSelectedProjectUpdatesPage('${p[3].replace(/'/g,"\\'")}','${p[0]}')">View Project <i class="fas fa-arrow-right"></i></button></div></article>`;
             }).join('');
@@ -6441,8 +6471,8 @@ if(!document.getElementById('brightlifeProjectsPublicHeaderStyles')){var st=docu
                 try{
                     var map=await getPublicContentMap([key]), r=map&&map[key], body=document.getElementById('selectedProjectBody');
                     if(!body)return;
-                    var img=publicContentImage(map,key);
-                    if(!r || (!String(r.title||'').trim()&&!String(r.body||'').trim()&&!img)){
+                    var img=projectImageUrl(map,key);
+                    if(!r || (!String(r.title||'').trim()&&!String(r.body||'').trim()&&!publicContentImage(map,key))){
                         body.innerHTML='<div class="sp-empty"><i class="fas fa-bullhorn"></i><div style="font-weight:900;color:#243447;margin:10px 0 5px">No published updates yet</div><div>Approved updates for '+escapeHtml(title)+' will appear here when published by the administration.</div></div>';
                         return;
                     }
@@ -6466,7 +6496,7 @@ if(!document.getElementById('brightlifeProjectsPublicHeaderStyles')){var st=docu
             try{history.pushState({brightlife:'selected-project',page:'project-'+key},'', '#project-'+key);}catch(e){}
             if(!document.getElementById('brightlifeSelectedProjectStyles')){var st=document.createElement('style');st.id='brightlifeSelectedProjectStyles';st.textContent='.brightlife-selected-project{min-height:100vh;background:#f6f8fb;color:#102033}.brightlife-selected-project .sp-header{background:linear-gradient(135deg,#071426,#162b46);color:#fff;padding:28px 22px}.brightlife-selected-project .sp-inner{max-width:1050px;margin:0 auto}.brightlife-selected-project .sp-kicker{text-transform:uppercase;letter-spacing:.08em;font-size:10px;font-weight:900;opacity:.72}.brightlife-selected-project h1{font-size:clamp(28px,4vw,42px);margin:8px 0}.brightlife-selected-project .sp-content{max-width:1050px;margin:0 auto;padding:28px 22px 60px}.brightlife-selected-project .sp-card{background:#fff;border:1px solid #e4e9f0;border-radius:16px;overflow:hidden;box-shadow:0 8px 25px rgba(15,23,42,.06)}.brightlife-selected-project .sp-card img{width:100%;max-height:420px;object-fit:cover;display:block}.brightlife-selected-project .sp-body{padding:24px}.brightlife-selected-project .sp-body h2{margin:0 0 10px;font-size:22px}.brightlife-selected-project .sp-body p{margin:0;color:#526174;line-height:1.8;white-space:pre-line}.brightlife-selected-project .sp-meta{margin-top:18px;padding-top:12px;border-top:1px solid #edf1f5;color:#8995a4;font-size:11px;font-weight:800}.brightlife-selected-project .sp-empty{text-align:center;padding:55px 20px;color:#718096;background:#fff;border:1px dashed #d7e0e9;border-radius:16px}';document.head.appendChild(st);}
             projectPage.innerHTML='<div class="brightlife-selected-project">'+brightlifePublicHeader_('projects')+'<div class="sp-header"><div class="sp-inner"><div class="sp-kicker">SND Brightlife CBO · Published Updates</div><h1>'+escapeHtml(title)+'</h1><div style="opacity:.78;font-size:13px">Only published information for this selected project is shown.</div></div></div><div class="sp-content" id="selectedProjectBody"><div class="sp-empty"><i class="fas fa-spinner fa-spin"></i> Loading published updates…</div></div></div>';
-            try{var map=await getPublicContentMap([key]), r=map&&map[key], body=document.getElementById('selectedProjectBody'); if(!body)return; var img=publicContentImage(map,key); if(!r || (!String(r.title||'').trim()&&!String(r.body||'').trim()&&!img)){body.innerHTML='<div class="sp-empty"><i class="fas fa-bullhorn" style="font-size:28px;margin-bottom:12px"></i><div style="font-weight:900;color:#243447;margin-bottom:5px">No published updates yet</div><div>Approved updates for '+escapeHtml(title)+' will appear here when published by the administration.</div></div>';return;} var d=r.updated_at?new Date(r.updated_at):null, dateLabel=d&&!isNaN(d.getTime())?d.toLocaleDateString(undefined,{year:'numeric',month:'long',day:'numeric'}):'Recently published'; body.innerHTML='<article class="sp-card">'+(img?'<img src="'+String(img).replace(/"/g,'&quot;')+'" alt="'+escapeHtml(r.title||title)+'">':'')+'<div class="sp-body"><h2>'+escapeHtml(r.title||title)+'</h2><p>'+escapeHtml(r.body||'')+'</p><div class="sp-meta">Published update · '+escapeHtml(dateLabel)+'</div></div></article>';}catch(e){var b=document.getElementById('selectedProjectBody');if(b)b.innerHTML='<div class="sp-empty"><i class="fas fa-circle-exclamation" style="font-size:28px;margin-bottom:12px"></i><div style="font-weight:900;color:#243447;margin-bottom:5px">Unable to load this project</div><div>'+escapeHtml(e.message||'Please try again.')+'</div></div>';}
+            try{var map=await getPublicContentMap([key]), r=map&&map[key], body=document.getElementById('selectedProjectBody'); if(!body)return; var img=projectImageUrl(map,key); if(!r || (!String(r.title||'').trim()&&!String(r.body||'').trim()&&!publicContentImage(map,key))){body.innerHTML='<div class="sp-empty"><i class="fas fa-bullhorn" style="font-size:28px;margin-bottom:12px"></i><div style="font-weight:900;color:#243447;margin-bottom:5px">No published updates yet</div><div>Approved updates for '+escapeHtml(title)+' will appear here when published by the administration.</div></div>';return;} var d=r.updated_at?new Date(r.updated_at):null, dateLabel=d&&!isNaN(d.getTime())?d.toLocaleDateString(undefined,{year:'numeric',month:'long',day:'numeric'}):'Recently published'; body.innerHTML='<article class="sp-card">'+(img?'<img src="'+String(img).replace(/"/g,'&quot;')+'" alt="'+escapeHtml(r.title||title)+'">':'')+'<div class="sp-body"><h2>'+escapeHtml(r.title||title)+'</h2><p>'+escapeHtml(r.body||'')+'</p><div class="sp-meta">Published update · '+escapeHtml(dateLabel)+'</div></div></article>';}catch(e){var b=document.getElementById('selectedProjectBody');if(b)b.innerHTML='<div class="sp-empty"><i class="fas fa-circle-exclamation" style="font-size:28px;margin-bottom:12px"></i><div style="font-weight:900;color:#243447;margin-bottom:5px">Unable to load this project</div><div>'+escapeHtml(e.message||'Please try again.')+'</div></div>';}
         }
 
         async function loadTrainingsPage(){
@@ -11403,7 +11433,7 @@ html+=`<div class="section-card" id="reportFilters"><div class="section-title"><
                     ['training','Training & Capacity Building','Seminars, workshops, community training, lessons and photos.']
                 ];
                 var html='<div class="dashboard-body"><div class="welcome-hero"><div><div class="welcome-kicker">Authorized Personnel</div><div class="welcome-title">CBO Content Management</div><div class="welcome-sub">Publish clear, factual updates for members and the public. Financial records remain separate from this area.</div></div></div><div class="section-card" style="margin-bottom:14px;border-left:4px solid var(--primary);"><div class="section-title"><i class="fas fa-layer-group"></i> Projects are administrator-managed</div><p style="font-size:12px;color:var(--gray-600);line-height:1.7;margin:0;">Update any project whenever there is new approved information. Change the title, description and photo URL, then press <strong>Save &amp; Publish</strong>. The public Projects page reads the published content directly, so you do not need to edit the website code for routine project updates.</p></div><div class="site-grid">';
-                sections.forEach(function(sec){var r=byKey[sec[0]]||{};html+='<div class="section-card content-editor-card" style="grid-column:1/-1"><div class="section-title"><i class="fas fa-pen-to-square"></i> '+escapeHtml(sec[1])+'</div><p style="font-size:11px;color:var(--gray-500);margin:0 0 14px">'+escapeHtml(sec[2])+'</p><div class="content-editor-grid"><div class="form-group"><label>Title / Heading</label><input class="form-control" id="contentTitle_'+sec[0]+'" value="'+escapeHtml(r.title||'')+'" placeholder="Enter title"></div><div class="form-group"><label>Photo URL (optional)</label><input class="form-control" id="contentPhoto_'+sec[0]+'" value="'+escapeHtml(r.image_url||'')+'" placeholder="https://..." oninput="updateContentPhotoPreview(&quot;'+sec[0]+'&quot;)"><small style="display:block;margin-top:6px;color:var(--gray-500)">Use a direct, publicly accessible image link (JPG, PNG or WebP). Google Drive share links are converted where possible.</small><img id="contentPhotoPreview_'+sec[0]+'" alt="Photo preview" style="display:none;width:100%;max-width:360px;max-height:190px;object-fit:cover;border-radius:10px;margin-top:10px;border:1px solid #dbe3ec"><small id="contentPhotoMessage_'+sec[0]+'" style="display:block;margin-top:5px;color:#64748b">Paste a direct photo link to preview it here.</small></div><div class="form-group" style="grid-column:1/-1"><label>Notes / Description</label><textarea class="form-control" id="contentBody_'+sec[0]+'" rows="4" placeholder="Write the approved update…">'+escapeHtml(r.body||'')+'</textarea></div></div><div style="display:flex;justify-content:flex-end;margin-top:12px"><button class="btn-primary" onclick="saveSiteContent(&quot;'+sec[0]+'&quot;)"><i class="fas fa-cloud-arrow-up"></i> Save & Publish</button></div></div>';});
+                sections.forEach(function(sec){var r=byKey[sec[0]]||{};html+='<div class="section-card content-editor-card" style="grid-column:1/-1"><div class="section-title"><i class="fas fa-pen-to-square"></i> '+escapeHtml(sec[1])+'</div><p style="font-size:11px;color:var(--gray-500);margin:0 0 14px">'+escapeHtml(sec[2])+'</p><div class="content-editor-grid"><div class="form-group"><label>Title / Heading</label><input class="form-control" id="contentTitle_'+sec[0]+'" value="'+escapeHtml(r.title||'')+'" placeholder="Enter title"></div><div class="form-group"><label>Photo URL (optional)</label><input class="form-control" id="contentPhoto_'+sec[0]+'" value="'+escapeHtml(r.image_url||'')+'" placeholder="https://..." oninput="updateContentPhotoPreview(&quot;'+sec[0]+'&quot;)"><small style="display:block;margin-top:6px;color:var(--gray-500)">Optional replacement photo. The website already includes a project photo by default; paste a public JPG, PNG or WebP URL here to replace it. Google Drive share links are converted where possible.</small><img id="contentPhotoPreview_'+sec[0]+'" alt="Photo preview" style="display:none;width:100%;max-width:360px;max-height:190px;object-fit:cover;border-radius:10px;margin-top:10px;border:1px solid #dbe3ec"><small id="contentPhotoMessage_'+sec[0]+'" style="display:block;margin-top:5px;color:#64748b">Paste a direct photo link to preview it here.</small></div><div class="form-group" style="grid-column:1/-1"><label>Notes / Description</label><textarea class="form-control" id="contentBody_'+sec[0]+'" rows="4" placeholder="Write the approved update…">'+escapeHtml(r.body||'')+'</textarea></div></div><div style="display:flex;justify-content:flex-end;margin-top:12px"><button class="btn-primary" onclick="saveSiteContent(&quot;'+sec[0]+'&quot;)"><i class="fas fa-cloud-arrow-up"></i> Save & Publish</button></div></div>';});
                 html+='</div></div>';el.innerHTML=html;
                 sections.forEach(function(sec){updateContentPhotoPreview(sec[0]);});
             }catch(e){el.innerHTML='<div class="dashboard-body"><div class="section-card"><div class="alert alert-error">'+escapeHtml(e.message||'Unable to load content manager.')+'</div></div></div>';}
