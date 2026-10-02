@@ -6344,7 +6344,7 @@ function updateUserInfo(member) {
 
 if(!document.getElementById('brightlifeProjectsPublicHeaderStyles')){var st=document.createElement('style');st.id='brightlifeProjectsPublicHeaderStyles';st.textContent='#mainWrapper.public-projects-mode{padding:0!important;margin:0!important;width:100%!important;max-width:none!important}#mainWrapper.public-projects-mode #dashboard{display:block!important;margin:0!important;padding:0!important;background:transparent!important;border-radius:0!important;box-shadow:none!important}#mainWrapper.public-projects-mode #dashboardContent{padding:0!important;margin:0!important}#mainWrapper.public-projects-mode .public-projects-landing{min-height:100vh;width:100%;padding-top:0!important}#mainWrapper.public-projects-mode .public-projects-content{max-width:1200px;margin:0 auto;padding:44px 28px 70px!important}#mainWrapper.public-projects-mode .public-projects-heading{padding:26px 0 30px;text-align:left}#mainWrapper.public-projects-mode .public-projects-heading h1{margin:7px 0 10px;font-size:clamp(32px,4vw,48px);letter-spacing:-.03em;color:#102033}#mainWrapper.public-projects-mode .public-projects-heading p{max-width:780px;margin:0;color:#5b6b7e;line-height:1.75}@media(max-width:700px){#mainWrapper.public-projects-mode .public-projects-content{padding:30px 16px 50px!important}#mainWrapper.public-projects-mode .public-projects-heading{padding-top:20px}}';document.head.appendChild(st);}
         async function loadProjectsPage(){
-            const keys=['water','poultry','agriculture','bike_skills','education','entrepreneurship','women','youth','community_development','other'];
+            const keys=['projects_intro','water','poultry','agriculture','bike_skills','education','entrepreneurship','women','youth','community_development','other'];
             const map=await getPublicContentMap(keys);
             const projects=[
                 ['water','Water Supply','fa-faucet-drip','Clean Water, Treatment & Water Vending','Community water access, treatment, vending, hygiene and practical water-related development activities.'],
@@ -6360,9 +6360,9 @@ if(!document.getElementById('brightlifeProjectsPublicHeaderStyles')){var st=docu
             ];
             if(!document.getElementById('brightlifeProjectCardsStyles')){
                 const st=document.createElement('style'); st.id='brightlifeProjectCardsStyles'; st.textContent=`
-                    .brightlife-project-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:22px;margin-top:30px}
+                    .brightlife-project-cards{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:16px;margin-top:30px}
                     .brightlife-project-card{background:#fff;border:1px solid #e3e9f0;border-radius:22px;overflow:hidden;box-shadow:0 12px 35px rgba(8,25,45,.08);display:flex;flex-direction:column;min-height:100%}
-                    .brightlife-project-card .project-card-image{height:190px;background:linear-gradient(135deg,#0b1d32,#17466b);display:grid;place-items:center;overflow:hidden}
+                    .brightlife-project-card .project-card-image{height:155px;background:linear-gradient(135deg,#0b1d32,#17466b);display:grid;place-items:center;overflow:hidden}
                     .brightlife-project-card .project-card-image img{width:100%;height:100%;object-fit:cover;display:block}
                     .brightlife-project-card .project-card-icon{width:64px;height:64px;border-radius:18px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.18);display:grid;place-items:center;color:#fff;font-size:27px}
                     .brightlife-project-card .project-card-body{padding:23px;display:flex;flex-direction:column;flex:1}
@@ -6371,8 +6371,9 @@ if(!document.getElementById('brightlifeProjectsPublicHeaderStyles')){var st=docu
                     .brightlife-project-card .project-view-btn{margin-top:20px;display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:11px;background:#102033;color:#fff;padding:12px 15px;font-weight:900;cursor:pointer;text-decoration:none}
                     .brightlife-project-card .project-view-btn:hover{background:#173b61;transform:translateY(-1px)}
                     .projects-page-note{max-width:820px;color:#59687a;line-height:1.8;margin-top:8px}
-                    @media(max-width:980px){.brightlife-project-cards{grid-template-columns:repeat(2,minmax(0,1fr))}}
-                    @media(max-width:620px){.brightlife-project-cards{grid-template-columns:1fr}.brightlife-project-card .project-card-image{height:170px}}
+                    @media(max-width:1200px){.brightlife-project-cards{grid-template-columns:repeat(3,minmax(0,1fr))}}
+                    @media(max-width:820px){.brightlife-project-cards{grid-template-columns:repeat(2,minmax(0,1fr))}}
+                    @media(max-width:620px){.brightlife-project-cards{grid-template-columns:1fr}.brightlife-project-card .project-card-image{height:185px}}
                 `; document.head.appendChild(st);
             }
             var body=document.getElementById('dashboardContent'); if(!body)return;
@@ -6382,7 +6383,7 @@ if(!document.getElementById('brightlifeProjectsPublicHeaderStyles')){var st=docu
             body.innerHTML=`<div class="brightlife-public-page public-projects-landing" id="brightlife-projects-public-page">
                 ${brightlifePublicHeader_('projects')}
                 <main class="public-main-content public-projects-content">
-                    <div class="public-projects-heading"><div class="site-kicker">PROJECTS &amp; COMMUNITY INITIATIVES</div><h1>Our Projects</h1><p class="projects-page-note">Explore a project to view the latest information published by the authorized administrator or responsible project lead. Project pages display only approved and published updates.</p></div>
+                    <div class="public-projects-heading"><div class="site-kicker">PROJECTS &amp; COMMUNITY INITIATIVES</div><h1>Our Projects</h1><p class="projects-page-note">${escapeHtml(publicContentText(map,'projects_intro','Explore a project to view the latest information published by the authorized administrator or responsible project lead. Project pages display only approved and published updates.'))}</p></div>
                     <div class="brightlife-project-cards" id="brightlifeProjectCards"></div>
                 </main>
             </div>`;
@@ -11384,6 +11385,7 @@ html+=`<div class="section-card" id="reportFilters"><div class="section-title"><
                 var rows=result.items||[];
                 var byKey={}; rows.forEach(function(r){byKey[r.content_key]=r;});
                 var sections=[
+                    ['projects_intro','Projects — Page Introduction','Controls the introduction shown at the top of the public Projects page.'],
                     ['home_hero','Home — Hero Section','Main heading, introduction and optional hero image.'],
                     ['home_about','Home — Who We Are','Organizational introduction.'],
                     ['home_feature','Home — Featured Update','Current community highlight for the Home page.'],
@@ -11400,7 +11402,7 @@ html+=`<div class="section-card" id="reportFilters"><div class="section-title"><
                     ['other','Other Community Projects','Additional approved initiatives and community updates.'],
                     ['training','Training & Capacity Building','Seminars, workshops, community training, lessons and photos.']
                 ];
-                var html='<div class="dashboard-body"><div class="welcome-hero"><div><div class="welcome-kicker">Authorized Personnel</div><div class="welcome-title">CBO Content Management</div><div class="welcome-sub">Publish clear, factual updates for members and the public. Financial records remain separate from this area.</div></div></div><div class="site-grid">';
+                var html='<div class="dashboard-body"><div class="welcome-hero"><div><div class="welcome-kicker">Authorized Personnel</div><div class="welcome-title">CBO Content Management</div><div class="welcome-sub">Publish clear, factual updates for members and the public. Financial records remain separate from this area.</div></div></div><div class="section-card" style="margin-bottom:14px;border-left:4px solid var(--primary);"><div class="section-title"><i class="fas fa-layer-group"></i> Projects are administrator-managed</div><p style="font-size:12px;color:var(--gray-600);line-height:1.7;margin:0;">Update any project whenever there is new approved information. Change the title, description and photo URL, then press <strong>Save &amp; Publish</strong>. The public Projects page reads the published content directly, so you do not need to edit the website code for routine project updates.</p></div><div class="site-grid">';
                 sections.forEach(function(sec){var r=byKey[sec[0]]||{};html+='<div class="section-card content-editor-card" style="grid-column:1/-1"><div class="section-title"><i class="fas fa-pen-to-square"></i> '+escapeHtml(sec[1])+'</div><p style="font-size:11px;color:var(--gray-500);margin:0 0 14px">'+escapeHtml(sec[2])+'</p><div class="content-editor-grid"><div class="form-group"><label>Title / Heading</label><input class="form-control" id="contentTitle_'+sec[0]+'" value="'+escapeHtml(r.title||'')+'" placeholder="Enter title"></div><div class="form-group"><label>Photo URL (optional)</label><input class="form-control" id="contentPhoto_'+sec[0]+'" value="'+escapeHtml(r.image_url||'')+'" placeholder="https://..." oninput="updateContentPhotoPreview(&quot;'+sec[0]+'&quot;)"><small style="display:block;margin-top:6px;color:var(--gray-500)">Use a direct, publicly accessible image link (JPG, PNG or WebP). Google Drive share links are converted where possible.</small><img id="contentPhotoPreview_'+sec[0]+'" alt="Photo preview" style="display:none;width:100%;max-width:360px;max-height:190px;object-fit:cover;border-radius:10px;margin-top:10px;border:1px solid #dbe3ec"><small id="contentPhotoMessage_'+sec[0]+'" style="display:block;margin-top:5px;color:#64748b">Paste a direct photo link to preview it here.</small></div><div class="form-group" style="grid-column:1/-1"><label>Notes / Description</label><textarea class="form-control" id="contentBody_'+sec[0]+'" rows="4" placeholder="Write the approved update…">'+escapeHtml(r.body||'')+'</textarea></div></div><div style="display:flex;justify-content:flex-end;margin-top:12px"><button class="btn-primary" onclick="saveSiteContent(&quot;'+sec[0]+'&quot;)"><i class="fas fa-cloud-arrow-up"></i> Save & Publish</button></div></div>';});
                 html+='</div></div>';el.innerHTML=html;
                 sections.forEach(function(sec){updateContentPhotoPreview(sec[0]);});
