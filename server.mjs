@@ -126,7 +126,7 @@ async function serveStatic(req, res, url) {
     const ext = path.extname(filePath).toLowerCase();
     res.statusCode = 200;
     res.setHeader('Content-Type', MIME[ext] || 'application/octet-stream');
-    res.setHeader('Cache-Control', requestPath.startsWith('/assets/') ? 'public, max-age=31536000, immutable' : 'public, max-age=3600');
+    res.setHeader('Cache-Control', requestPath.startsWith('/assets/') ? 'public, max-age=0, must-revalidate' : 'public, max-age=3600');
     res.end(await readFile(filePath));
   } catch {
     if (!path.extname(requestPath)) {

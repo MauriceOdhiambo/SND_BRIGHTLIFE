@@ -293,6 +293,10 @@ function navigateTo(page) {
                 return;
             }
             currentPage = page;
+            try {
+                var routeHash = '#' + page;
+                if (location.hash !== routeHash) history.pushState({brightlife:'route',page:page}, '', routeHash);
+            } catch (e) {}
 
             // Keep the standalone project renderer isolated from the member workspace.
             // When the user leaves a project page, hide it completely so it cannot sit
@@ -323,9 +327,19 @@ function navigateTo(page) {
                 var projectsDashboard=document.getElementById('dashboard');
                 var projectsSidebar=document.getElementById('sidebar');
                 var projectsTopbar=document.getElementById('memberTopbar');
-                if(projectsDashboard) projectsDashboard.classList.add('brightlife-public-mode');
-                if(projectsSidebar){ projectsSidebar.style.display='none'; projectsSidebar.classList.remove('visible','open'); projectsSidebar.setAttribute('aria-hidden','true'); }
-                if(projectsTopbar){ projectsTopbar.style.display='none'; projectsTopbar.setAttribute('aria-hidden','true'); }
+                var projectsMember=!!getCanonicalMemberId();
+                if(projectsDashboard) projectsDashboard.classList.toggle('brightlife-public-mode', !projectsMember);
+                if(projectsMember){
+                    document.body.classList.add('workspace-active');
+                    if(projectsSidebar){ projectsSidebar.style.display='flex'; projectsSidebar.classList.add('visible'); projectsSidebar.removeAttribute('aria-hidden'); }
+                    if(projectsTopbar){ projectsTopbar.style.display='flex'; projectsTopbar.setAttribute('aria-hidden','false'); }
+                    var projectsMain=document.getElementById('mainWrapper');
+                    if(projectsMain) projectsMain.classList.add('with-sidebar');
+                    ensureAuthenticatedWorkspaceNavigation();
+                } else {
+                    if(projectsSidebar){ projectsSidebar.style.display='none'; projectsSidebar.classList.remove('visible','open'); projectsSidebar.setAttribute('aria-hidden','true'); }
+                    if(projectsTopbar){ projectsTopbar.style.display='none'; projectsTopbar.setAttribute('aria-hidden','true'); }
+                }
             }
             if(page !== 'home' && page !== 'projects'){
                 var publicLanding = document.getElementById('publicHomeLanding');
@@ -1336,11 +1350,21 @@ if(!document.getElementById('brightlifeProjectsPublicHeaderStyles')){var st=docu
                 `; document.head.appendChild(st);
             }
             var body=document.getElementById('dashboardContent'); if(!body)return;
-            var mw=document.getElementById('mainWrapper'); if(mw)mw.classList.add('public-projects-mode');
+            var memberWorkspace=!!getCanonicalMemberId();
+            var mw=document.getElementById('mainWrapper');
             var sidebar=document.getElementById('sidebar'); var topbar=document.getElementById('memberTopbar');
-            if(sidebar)sidebar.style.display='none'; if(topbar)topbar.style.display='none';
-            body.innerHTML=`<div class="brightlife-public-page public-projects-landing" id="brightlife-projects-public-page">
-                ${brightlifePublicHeader_('projects')}
+            if(memberWorkspace){
+                if(mw)mw.classList.remove('public-projects-mode','public-site-mode');
+                document.body.classList.add('workspace-active');
+                if(sidebar){sidebar.style.display='flex';sidebar.classList.add('visible');sidebar.removeAttribute('aria-hidden');}
+                if(topbar){topbar.style.display='flex';topbar.setAttribute('aria-hidden','false');}
+                ensureAuthenticatedWorkspaceNavigation();
+            }else{
+                if(mw)mw.classList.add('public-projects-mode');
+                if(sidebar)sidebar.style.display='none'; if(topbar)topbar.style.display='none';
+            }
+            body.innerHTML=`<div class="brightlife-public-page public-projects-landing ${memberWorkspace?'workspace-projects-page':''}" id="brightlife-projects-public-page">
+                ${memberWorkspace?'':brightlifePublicHeader_('projects')}
                 <main class="public-main-content public-projects-content">
                     <div class="public-projects-heading"><div class="site-kicker">PROJECTS &amp; COMMUNITY INITIATIVES</div><h1>Our Projects</h1><p class="projects-page-note">${escapeHtml(publicContentText(map,'projects_intro','Explore a project to view the latest information published by the authorized administrator or responsible project lead. Project pages display only approved and published updates.'))}</p></div>
                     <div class="brightlife-project-cards" id="brightlifeProjectCards"></div>
@@ -5836,20 +5860,13 @@ html+=`<div class="section-card" id="reportFilters"><div class="section-title"><
 
         window.addEventListener('popstate', function(){
             var h=(location.hash||'').replace('#','');
-            if(h==='member-login'){ openMemberLogin(false); }
-            else if(h==='member-registration'){ openMemberRegistration(false); }
-            else if(['about','programs','approach','finance','membership','projects','partner','contact'].indexOf(h)>=0){ showBrightlifeInnerPage(h,false); }
-            else if(h==='home'||!h){ showPublicHome(false); }
-        });
-
-        window.addEventListener('popstate', function() {
-            var auth=document.getElementById('app');
-            var dashboard=document.getElementById('dashboard');
-            var routeHash=(location.hash||'').replace('#','');
-            if (auth && auth.style.display !== 'none' && (!dashboard || dashboard.style.display === 'none') && !getCanonicalMemberId() && routeHash!=='member-login' && routeHash!=='member-registration') {
-                if (auth.classList) auth.classList.remove('registration-mode');
-                showPublicHome();
-            }
+            var secureRouteMap={dashboard:1,savings:1,loans:1,loanmanagement:1,guarantors:1,repayments:1,transactions:1,reports:1,profile:1,messages:1,settings:1,contentmanagement:1,adminsettings:1,admin:1,members:1,alltransactions:1,executive:1,chat:1,rights:1};
+            if(h==='member-login'){ openMemberLogin(false); return; }
+            if(h==='member-registration'){ openMemberRegistration(false); return; }
+            if(['about','programs','approach','finance','membership','projects','partner','contact'].indexOf(h)>=0){ showBrightlifeInnerPage(h,false); return; }
+            if(secureRouteMap[h]){ if(getCanonicalMemberId()) navigateTo(h); else openMemberLogin(false); return; }
+            if(h.indexOf('project-')===0 || h==='trainings'){ if(getCanonicalMemberId() || h==='trainings') navigateTo(h); else showPublicHome(false); return; }
+            if(h==='home'||!h){ showPublicHome(false); }
         });
 
         function showPublicHome(pushHistory) {
@@ -6446,12 +6463,10 @@ html+=`<div class="section-card" id="reportFilters"><div class="section-title"><
 
             currentPage = 'login';
             try { history.replaceState({brightlife:'login'}, '', '#member-login'); } catch (e) {}
-            if (typeof openMemberLogin === 'function') {
-                openMemberLogin(false);
-                try { history.replaceState({brightlife:'login'}, '', '#member-login'); } catch (e) {}
-            }
+            if (typeof openMemberLogin === 'function') openMemberLogin(false);
+            try { history.replaceState({brightlife:'login'}, '', '#member-login'); } catch (e) {}
             window.scrollTo({top:0, behavior:'auto'});
-            showToast('You have been logged out successfully. Please sign in again.', 'info');
+            setTimeout(function(){ var loginTab=document.getElementById('loginTab'); if(loginTab) loginTab.click(); }, 0);
         }
         window.addEventListener('error', function(e) { console.error('Brightlife runtime error:', e.error || e.message); });
         window.addEventListener('unhandledrejection', function(e) { console.error('Brightlife async error:', e.reason); });
@@ -6522,7 +6537,9 @@ html+=`<div class="section-card" id="reportFilters"><div class="section-title"><
                     updateUserInfo(account.member);
                     showSidebar();
                     if (bootLoader) bootLoader.style.display = 'none';
-                    loadDashboard(true);
+                    var initialRoute=(window.location.hash||'').replace('#','');
+                    var secureInitial={dashboard:1,savings:1,loans:1,loanmanagement:1,guarantors:1,repayments:1,transactions:1,reports:1,profile:1,messages:1,settings:1,contentmanagement:1,adminsettings:1,admin:1,members:1,alltransactions:1,executive:1,chat:1,rights:1};
+                    if(secureInitial[initialRoute]) navigateTo(initialRoute); else loadDashboard(true);
                 }).catch(function(error){
                     console.error('Account verification failed:', error);
                     sessionStorage.clear();

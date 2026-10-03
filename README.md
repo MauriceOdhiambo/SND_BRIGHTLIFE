@@ -1,6 +1,6 @@
 # SND Brightlife CBO
 
-Production web application for SND Brightlife CBO covering member services, savings, table banking, lending, repayments, guarantor approvals, administration, reporting and community programmes.
+Production Node.js web application for SND Brightlife CBO covering member services, savings, table banking, lending, repayments, guarantor approvals, administration, reporting and community programmes.
 
 ## Stack
 
@@ -46,6 +46,10 @@ Never expose server secrets in browser code.
 ```
 
 The browser application keeps the established Brightlife workflows and calls the Node.js API at `/api/server`. The standalone Node server provides the same API locally while Vercel continues to run the production serverless functions.
+
+## Current production UI
+
+The workspace uses a persistent member navigation shell, responsive navigation, route-aware browser history, a direct member-login logout flow, and a responsive statement/reporting centre. Public navigation uses the same responsive layout rules across desktop and mobile.
 
 ## Production deployment
 
