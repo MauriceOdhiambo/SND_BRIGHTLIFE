@@ -1,0 +1,17 @@
+{
+  "name": "snd-brightlife",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "node server.mjs",
+    "start": "node server.mjs",
+    "check": "node --check server.mjs && node --check assets/app.js"
+  },
+  "devDependencies": {
+    "vercel": "^48.0.0"
+  }
+}
