@@ -363,6 +363,10 @@ function navigateTo(page) {
                 if(ov2) ov2.classList.add('show');
             }
 
+            if (hasMemberSession) {
+                ensureAuthenticatedWorkspaceNavigation();
+            }
+
             switch (page) {
                 case 'home':
                     loadPublicHomePage();
@@ -5543,9 +5547,9 @@ if(!document.getElementById('brightlifeProjectsPublicHeaderStyles')){var st=docu
                     const totalSavings=tx.filter(t=>t.type==='savings'&&t.status==='completed').reduce((a,t)=>a+Number(t.amount||0),0);
                     const totalPaid=reps.reduce((a,t)=>a+Number(t.amount||0),0);
                     const outstanding=loans.filter(l=>l.status==='active').reduce((a,l)=>a+Math.max(0,Number(l.total_repayment||0)-Number(l.amount_paid||0)),0);
-                    let html=`<div class="dashboard-body"><div class="welcome-hero"><div><div class="welcome-kicker">Reporting Centre</div><div class="welcome-title">My Reports & Statements</div><div class="welcome-sub">Savings, contributions, loans, repayments and account activity.</div></div></div>`;
+                    let html=`<div class="dashboard-body report-page"><div class="welcome-hero report-hero"><div><div class="welcome-kicker">Reporting Centre</div><div class="welcome-title">My Reports & Statements</div><div class="welcome-sub">Savings, contributions, loans, repayments and account activity.</div></div></div>`;
                     html+=`<div class="section-card"><div class="section-title"><i class="fas fa-chart-pie"></i> Financial Snapshot</div><div class="metric-grid"><div class="metric-surface"><div class="metric-label">Savings Balance</div><div class="metric-value">KES ${Number(p.savings_balance||0).toLocaleString()}</div></div><div class="metric-surface"><div class="metric-label">Total Contributions</div><div class="metric-value">KES ${totalSavings.toLocaleString()}</div></div><div class="metric-surface"><div class="metric-label">Loan Repayments</div><div class="metric-value">KES ${totalPaid.toLocaleString()}</div></div><div class="metric-surface"><div class="metric-label">Outstanding Loan</div><div class="metric-value">KES ${outstanding.toLocaleString()}</div></div></div></div>`;
-                    html+=`<div class="section-card"><div class="section-title"><i class="fas fa-download"></i> Export Centre</div><div class="report-actions"><button class="btn-sm btn-primary" onclick="downloadReportPdf('summary','')"><i class="fas fa-file-pdf"></i> PDF Report</button><button class="btn-sm btn-outline" onclick="downloadReportPdf('statement','')"><i class="fas fa-file-alt"></i> Account Statement</button><button class="btn-sm btn-outline" onclick="window.print()"><i class="fas fa-print"></i> Print</button></div></div>`;
+                    html+=`<div class="section-card"><div class="section-title"><i class="fas fa-file-invoice-dollar"></i> Statement & Export Centre</div><div class="report-actions"><button class="btn-sm btn-primary" onclick="downloadReportPdf('summary','')"><i class="fas fa-file-pdf"></i> PDF Report</button><button class="btn-sm btn-outline" onclick="downloadReportPdf('statement','')"><i class="fas fa-file-alt"></i> Account Statement</button><button class="btn-sm btn-outline" onclick="window.print()"><i class="fas fa-print"></i> Print</button></div></div>`;
                     html+=`<div class="section-card"><div class="section-title"><i class="fas fa-landmark"></i> Membership & Savings</div><div class="settings-table-wrap"><table class="settings-table"><tbody><tr><th>Member</th><td>${p.full_name||'—'}</td><th>National ID</th><td>${p.id_number||'—'}</td></tr><tr><th>Member Code</th><td>${p.unique_member_id||'—'}</td><th>Account Status</th><td>${p.is_active?'Active':'Pending'}</td></tr><tr><th>Savings Months</th><td>${p.qualifying_savings_months??0}</td><th>Loan Limit</th><td>KES ${Number(p.loan_limit||0).toLocaleString()}</td></tr></tbody></table></div></div>`;
                     html+=`<div class="section-card"><div class="section-title"><i class="fas fa-hand-holding-usd"></i> Loan Portfolio</div><div class="settings-table-wrap"><table class="settings-table"><thead><tr><th>Application</th><th>Amount</th><th>Interest</th><th>Total Due</th><th>Paid</th><th>Balance</th><th>Period</th><th>Due Date</th><th>Status</th></tr></thead><tbody>${loans.length?loans.map(l=>{const total=Number(l.total_repayment||l.amount||0),paid=Number(l.amount_paid||0),bal=Math.max(0,total-paid);return `<tr><td>${l.application_date?new Date(l.application_date).toLocaleDateString('en-KE'):'—'}</td><td>KES ${Number(l.amount||0).toLocaleString()}</td><td>${(Number(l.interest_rate||0)*100).toFixed(0)}%</td><td>KES ${total.toLocaleString()}</td><td>KES ${paid.toLocaleString()}</td><td>KES ${bal.toLocaleString()}</td><td>${l.repayment_period||'—'} days</td><td>${l.repayment_due_date?new Date(l.repayment_due_date).toLocaleDateString('en-KE'):'—'}</td><td>${l.status||'—'}</td></tr>`}).join(''):'<tr><td colspan="9">No loan records.</td></tr>'}</tbody></table></div></div>`;
                     html+=`<div class="section-card"><div class="section-title"><i class="fas fa-clock-rotate-left"></i> Repayment History</div><div class="settings-table-wrap"><table class="settings-table"><thead><tr><th>Date</th><th>Amount</th><th>M-Pesa Code</th><th>Method</th></tr></thead><tbody>${reps.length?reps.map(x=>`<tr><td>${x.payment_date?new Date(x.payment_date).toLocaleString('en-KE'):'—'}</td><td>KES ${Number(x.amount||0).toLocaleString()}</td><td>${x.mpesa_code||'—'}</td><td>${x.payment_method||'M-Pesa'}</td></tr>`).join(''):'<tr><td colspan="4">No repayments recorded.</td></tr>'}</tbody></table></div></div>`;
@@ -5560,7 +5564,7 @@ if(!document.getElementById('brightlifeProjectsPublicHeaderStyles')){var st=docu
                 const date=v=>v?new Date(v).toLocaleDateString('en-KE'):'—';
                 const esc=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
                 const kpi=(label,value,icon)=>`<div class="metric-surface"><div class="metric-label"><i class="fas ${icon}"></i> ${label}</div><div class="metric-value">${value}</div></div>`;
-                let html=`<div class="dashboard-body"><div class="welcome-hero"><div><div class="welcome-kicker">Management Reporting Centre</div><div class="welcome-title">SND Brightlife CBO Reports</div><div class="welcome-sub">Management, financial, lending, reconciliation and risk reporting.</div></div><div class="member-code-card"><div class="code-label">Generated</div><div class="code">${date(result.generatedAt)}</div><div class="code-name">Management records</div></div></div>`;
+                let html=`<div class="dashboard-body report-page management-report-page"><div class="welcome-hero report-hero"><div><div class="welcome-kicker">Management Reporting Centre</div><div class="welcome-title">SND Brightlife CBO Reports</div><div class="welcome-sub">Management, financial, lending, reconciliation and risk reporting.</div></div><div class="member-code-card"><div class="code-label">Generated</div><div class="code">${date(result.generatedAt)}</div><div class="code-name">Management records</div></div></div>`;
                 html+=`<div class="section-card" id="reportDirectory"><div class="section-title"><i class="fas fa-list-check"></i> Reports Available</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px">${[
 '1. Executive Summary','2. Membership Report','3. Registration Fees','4. Savings & Contributions','5. Loans & Disbursements','6. Loan Repayments & Collection','7. Loan Aging','8. Defaults / Risk','9. Guarantor Requests & History','10. Withdrawals','11. M-Pesa & Transaction Reconciliation','12. Member Loan Growth','13. Performance / 12-Month Activity','14. Audit Trail','15. Member Search & Filters','16. PDF Report','17. CSV Transaction Export','18. Print Report'].map((x,i)=>`<button class="btn-sm btn-outline" style="text-align:left" onclick="document.getElementById('reportSection${i+1}')?.scrollIntoView({behavior:'smooth',block:'start'})">${x}</button>`).join('')}</div></div>`;
 html+=`<div class="section-card" id="reportFilters"><div class="section-title"><i class="fas fa-filter"></i> Report Filters</div><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><label>From <input id="reportFrom" type="date" class="form-control" style="max-width:170px"></label><label>To <input id="reportTo" type="date" class="form-control" style="max-width:170px"></label><button class="btn-sm btn-primary" onclick="applyManagementReportFilters()"><i class="fas fa-filter"></i> Apply</button><button class="btn-sm btn-outline" onclick="clearManagementReportFilters()">Clear</button><button class="btn-sm btn-outline" onclick="window.print()"><i class="fas fa-print"></i> Print</button></div></div>`;
@@ -5832,14 +5836,17 @@ html+=`<div class="section-card" id="reportFilters"><div class="section-title"><
 
         window.addEventListener('popstate', function(){
             var h=(location.hash||'').replace('#','');
-            if(['about','programs','approach','finance','membership','projects','partner','contact'].indexOf(h)>=0){ showBrightlifeInnerPage(h,false); }
+            if(h==='member-login'){ openMemberLogin(false); }
+            else if(h==='member-registration'){ openMemberRegistration(false); }
+            else if(['about','programs','approach','finance','membership','projects','partner','contact'].indexOf(h)>=0){ showBrightlifeInnerPage(h,false); }
             else if(h==='home'||!h){ showPublicHome(false); }
         });
 
         window.addEventListener('popstate', function() {
             var auth=document.getElementById('app');
             var dashboard=document.getElementById('dashboard');
-            if (auth && auth.style.display !== 'none' && (!dashboard || dashboard.style.display === 'none') && !getCanonicalMemberId()) {
+            var routeHash=(location.hash||'').replace('#','');
+            if (auth && auth.style.display !== 'none' && (!dashboard || dashboard.style.display === 'none') && !getCanonicalMemberId() && routeHash!=='member-login' && routeHash!=='member-registration') {
                 if (auth.classList) auth.classList.remove('registration-mode');
                 showPublicHome();
             }
@@ -5883,8 +5890,10 @@ html+=`<div class="section-card" id="reportFilters"><div class="section-title"><
             try { history.pushState({brightlife:'public-home'}, '', '#home'); } catch(e) {}
         }
 
-        function openMemberLogin() {
-            try { history.pushState({brightlife:'login'}, '', '#member-login'); } catch(e) {}
+        function openMemberLogin(pushHistory) {
+            if(pushHistory !== false){ try { history.pushState({brightlife:'login'}, '', '#member-login'); } catch(e) {} }
+            document.body.classList.remove('public-site-body','workspace-active');
+            document.documentElement.classList.remove('public-site-html');
             var mainWrapper=document.getElementById('mainWrapper');
             if(mainWrapper && mainWrapper.classList) mainWrapper.classList.remove('public-site-mode');
             var publicHome = document.getElementById('publicHomeLanding');
@@ -5895,8 +5904,10 @@ html+=`<div class="section-card" id="reportFilters"><div class="section-title"><
             window.scrollTo(0, 0);
         }
 
-        function openMemberRegistration() {
-            try { history.pushState({brightlife:'registration'}, '', '#member-registration'); } catch(e) {}
+        function openMemberRegistration(pushHistory) {
+            if(pushHistory !== false){ try { history.pushState({brightlife:'registration'}, '', '#member-registration'); } catch(e) {} }
+            document.body.classList.remove('public-site-body','workspace-active');
+            document.documentElement.classList.remove('public-site-html');
             var mainWrapper=document.getElementById('mainWrapper');
             if(mainWrapper && mainWrapper.classList) mainWrapper.classList.remove('public-site-mode');
             var publicHome = document.getElementById('publicHomeLanding');
@@ -6433,10 +6444,14 @@ html+=`<div class="section-card" id="reportFilters"><div class="section-title"><
             document.body.style.display = 'block';
             updateUserInfo(null);
 
-            try { history.replaceState({brightlife:'public-home'}, '', '#home'); } catch (e) {}
-            if (typeof loadPublicHomePage === 'function') loadPublicHomePage();
+            currentPage = 'login';
+            try { history.replaceState({brightlife:'login'}, '', '#member-login'); } catch (e) {}
+            if (typeof openMemberLogin === 'function') {
+                openMemberLogin(false);
+                try { history.replaceState({brightlife:'login'}, '', '#member-login'); } catch (e) {}
+            }
             window.scrollTo({top:0, behavior:'auto'});
-            showToast('You have been logged out successfully', 'info');
+            showToast('You have been logged out successfully. Please sign in again.', 'info');
         }
         window.addEventListener('error', function(e) { console.error('Brightlife runtime error:', e.error || e.message); });
         window.addEventListener('unhandledrejection', function(e) { console.error('Brightlife async error:', e.reason); });
